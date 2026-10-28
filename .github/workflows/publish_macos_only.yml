@@ -5,6 +5,15 @@ name: macos-build
 on:
   workflow_dispatch:
     inputs:
+      runner:
+        description: "运行器：macos-latest/macos-15 为 arm64，macos-15-intel 为 x64（arm64 常因容量不足排队）"
+        type: choice
+        required: false
+        default: macos-latest
+        options:
+          - macos-latest
+          - macos-15
+          - macos-15-intel
       tag_name:
         description: "可选：填了就发 Release（如 v8.0.0）；留空只上传 Artifact"
         required: false
@@ -12,7 +21,7 @@ on:
 
 jobs:
   build-macos:
-    runs-on: macos-latest
+    runs-on: ${{ inputs.runner || 'macos-latest' }}
     permissions:
       contents: write
     steps:
@@ -20,6 +29,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: master
+
+      - name: Show runner info
+        run: |
+          echo "runner label: ${{ inputs.runner }}"
+          uname -m
+          sw_vers
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
