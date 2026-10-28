@@ -86,60 +86,62 @@ jobs:
             simple_live_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
             simple_live_app/build/app/outputs/flutter-apk/app-x86_64-release.apk
 
-  # iOS 只能跑在 macOS 上，抢不到 runner 就只能认了 —— 但至少不再拖累 Android。
-  # 出的是未签名 ipa（--no-codesign + 手工 zip Payload），靠 AltStore / Sideloadly
-  # 自签安装，7 天过期。
-  build-ios:
-    runs-on: macos-latest
-    steps:
-      #签出代码
-      - uses: actions/checkout@v4
-        with:
-          ref: master
+  # iOS 构建暂时停用 —— 维护者没有 iOS 设备，产出的未签名 ipa 也没人装，
+  # 却每次发版都要去抢一次 macOS runner（抢不到还会拖慢整条流水线）。
+  # 需要恢复时把下面整块取消注释，并把 publish-mobile 的 needs 改回
+  # [build-android, build-ios] 即可。
+  #
+  # build-ios:
+  #   runs-on: macos-latest
+  #   steps:
+  #     #签出代码
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         ref: master
+  #
+  #     #设置Flutter
+  #     - name: Flutter action
+  #       uses: subosito/flutter-action@v2
+  #       with:
+  #         flutter-version: "3.38.x"
+  #         cache: true
+  #
+  #     #更新Flutter的packages
+  #     - name: Restore packages
+  #       run: |
+  #         cd simple_live_app
+  #         flutter pub get
+  #
+  #     #打包iOS（未签名，靠 AltStore / Sideloadly 自签安装，7 天过期）
+  #     - name: Build IPA
+  #       run: |
+  #         cd simple_live_app
+  #         flutter build ios --release --no-codesign
+  #
+  #     #创建未签名ipa
+  #     - name: Create IPA
+  #       run: |
+  #         cd simple_live_app
+  #         mkdir build/ios/iphoneos/Payload
+  #         cp -R build/ios/iphoneos/Runner.app build/ios/iphoneos/Payload/Runner.app
+  #         cd build/ios/iphoneos/
+  #         zip -q -r ios_no_sign.ipa Payload
+  #         cd ../../..
+  #
+  #     #上传IPA至Artifacts
+  #     - name: Upload IPA to Artifacts
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: mobile-ios
+  #         path: |
+  #           simple_live_app/build/ios/iphoneos/ios_no_sign.ipa
 
-      #设置Flutter
-      - name: Flutter action
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: "3.38.x"
-          cache: true
-
-      #更新Flutter的packages
-      - name: Restore packages
-        run: |
-          cd simple_live_app
-          flutter pub get
-
-      #打包iOS
-      - name: Build IPA
-        run: |
-          cd simple_live_app
-          flutter build ios --release --no-codesign
-
-      #创建未签名ipa
-      - name: Create IPA
-        run: |
-          cd simple_live_app
-          mkdir build/ios/iphoneos/Payload
-          cp -R build/ios/iphoneos/Runner.app build/ios/iphoneos/Payload/Runner.app
-          cd build/ios/iphoneos/
-          zip -q -r ios_no_sign.ipa Payload
-          cd ../../..
-
-      #上传IPA至Artifacts
-      - name: Upload IPA to Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: mobile-ios
-          path: |
-            simple_live_app/build/ios/iphoneos/ios_no_sign.ipa
-
-  # 汇总 Android + iOS 再发 Release。分两步而不是各发各的，有两个理由：
-  #   1. 两个 job 同时往同一个 release 传文件会打架（matrix 里踩过这个坑）；
-  #   2. iOS 抢不到 runner 被取消时，APK 仍然要能发出去 —— 所以用 !cancelled()
-  #      而不是默认的「needs 全成功才跑」。
+  # 汇总 Android（以及将来恢复后的 iOS）再发 Release。分两步而不是直接让
+  # build-android 自己发，是为了留一个统一的出口：
+  #   1. 多个 job 同时往同一个 release 传文件会打架（matrix 里踩过这个坑）；
+  #   2. 用 !cancelled() 而不是默认的「needs 全成功」，某个平台挂了不影响别的。
   publish-mobile:
-    needs: [build-android, build-ios]
+    needs: build-android
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     permissions:
