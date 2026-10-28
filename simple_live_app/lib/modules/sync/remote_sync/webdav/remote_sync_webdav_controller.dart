@@ -19,6 +19,10 @@ import 'package:simple_live_app/app/utils/document.dart';
 import 'package:simple_live_app/models/db/follow_user.dart';
 import 'package:simple_live_app/models/db/follow_user_tag.dart';
 import 'package:simple_live_app/models/db/history.dart';
+import 'package:simple_live_app/modules/iptv/iptv_service.dart';
+import 'package:simple_live_app/modules/iptv/iptv_tab_refresher.dart';
+import 'package:simple_live_app/modules/iptv/models/iptv_channel.dart';
+import 'package:simple_live_app/modules/iptv/models/iptv_source.dart';
 import 'package:simple_live_app/modules/sync/remote_sync/webdav/webdav_client.dart';
 import 'package:simple_live_app/services/bilibili_account_service.dart';
 import 'package:simple_live_app/services/db_service.dart';
@@ -32,6 +36,7 @@ class RemoteSyncWebDAVController extends BaseController {
   var isSyncHistories = true.obs;
   var isSyncBlockWord = true.obs;
   var isSyncBilibiliAccount = true.obs;
+  var isSyncIptv = true.obs;
 
   late DAVClient davClient;
   var user = "--".obs;
@@ -44,6 +49,8 @@ class RemoteSyncWebDAVController extends BaseController {
   final _userBilibiliAccountJsonName = 'SimpleLive_bilibili_account.json';
   final _userSettingsJsonName = 'SimpleLive_Settings.json';
   final _userTagsJsonName = 'SimpleLive_Tags.json';
+  final _userIptvSourcesJsonName = 'SimpleLive_iptv_sources.json';
+  final _userIptvChannelsJsonName = 'SimpleLive_iptv_channels.json';
 
   @override
   void onInit() {
@@ -213,6 +220,29 @@ class RemoteSyncWebDAVController extends BaseController {
       final settingJsonFile = File(join(profile.path, _userSettingsJsonName));
       await settingJsonFile.writeAsString(jsonEncode(dataSettingListMap));
 
+      // iptv 直播源
+      // 频道也一起存：只还原源的话，新设备上得等下次自动更新才有频道列表，
+      // 而且播放列表里的顺序（order）也会丢。
+      var iptvSourcesMap = {
+        'data': IptvService.instance
+            .getSources()
+            .map((e) => e.toJson())
+            .toList()
+      };
+      final iptvSourcesJsonFile =
+          File(join(profile.path, _userIptvSourcesJsonName));
+      await iptvSourcesJsonFile.writeAsString(jsonEncode(iptvSourcesMap));
+
+      var iptvChannelsMap = {
+        'data': IptvService.instance
+            .getAllChannels()
+            .map((e) => e.toJson())
+            .toList()
+      };
+      final iptvChannelsJsonFile =
+          File(join(profile.path, _userIptvChannelsJsonName));
+      await iptvChannelsJsonFile.writeAsString(jsonEncode(iptvChannelsMap));
+
       // 遍历profile路径下的所有文件压缩
       await archive.addDirectoryToArchive(profile.path, profile.path);
       final zipEncoder = ZipEncoder();
@@ -238,6 +268,11 @@ class RemoteSyncWebDAVController extends BaseController {
     }
     SmartDialog.dismiss();
     SmartDialog.showToast('同步完成');
+    if (isSyncIptv.value) {
+      // 频道换了一批，旧节目单作废，列表也要重新拉
+      IptvService.instance.clearEpgCache();
+      IptvTabRefresher.refreshAll();
+    }
     DateTime recoverTime = DateTime.now();
     lastRecoverTime.value = Utils.parseTime(recoverTime);
     LocalStorageService.instance.setValue(
@@ -325,6 +360,29 @@ class RemoteSyncWebDAVController extends BaseController {
         } catch (e) {
           Log.e('同步用户自定义标签失败:$e', StackTrace.current);
         }
+      } else if (file.name == _userIptvSourcesJsonName && isSyncIptv.value) {
+        try {
+          // 和关注列表一样以云端为准，先清空再写入
+          await IptvService.instance.sourceBox.clear();
+          for (var item in jsonData) {
+            var source = IptvSource.fromJson(item as Map<String, dynamic>);
+            await IptvService.instance.sourceBox.put(source.id, source);
+          }
+          Log.i('已同步自定义直播源');
+        } catch (e) {
+          Log.e('同步自定义直播源失败:$e', StackTrace.current);
+        }
+      } else if (file.name == _userIptvChannelsJsonName && isSyncIptv.value) {
+        try {
+          await IptvService.instance.channelBox.clear();
+          for (var item in jsonData) {
+            var channel = IptvChannel.fromJson(item as Map<String, dynamic>);
+            await IptvService.instance.channelBox.put(channel.id, channel);
+          }
+          Log.i('已同步自定义直播源频道');
+        } catch (e) {
+          Log.e('同步自定义直播源频道失败:$e', StackTrace.current);
+        }
       } else {
         return;
       }
@@ -352,5 +410,9 @@ class RemoteSyncWebDAVController extends BaseController {
 
   void changeIsSyncBilibiliAccount() {
     isSyncBilibiliAccount.value = !isSyncBilibiliAccount.value;
+  }
+
+  void changeIsSyncIptv() {
+    isSyncIptv.value = !isSyncIptv.value;
   }
 }

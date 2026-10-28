@@ -131,6 +131,16 @@ class RemoteSyncWebDAVPage extends GetView<RemoteSyncWebDAVController> {
             ),
           ),
           AppStyle.divider,
+          Obx(
+            () => CheckboxListTile(
+              secondary: const Icon(Icons.live_tv),
+              title: const Text("同步自定义直播源"),
+              value: controller.isSyncIptv.value,
+              controlAffinity: ListTileControlAffinity.trailing,
+              onChanged: (value) => controller.changeIsSyncIptv(),
+            ),
+          ),
+          AppStyle.divider,
         ],
       ),
     );

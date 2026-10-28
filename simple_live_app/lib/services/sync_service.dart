@@ -13,6 +13,10 @@ import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/models/db/follow_user.dart';
 import 'package:simple_live_app/models/db/follow_user_tag.dart';
 import 'package:simple_live_app/models/db/history.dart';
+import 'package:simple_live_app/modules/iptv/iptv_service.dart';
+import 'package:simple_live_app/modules/iptv/iptv_tab_refresher.dart';
+import 'package:simple_live_app/modules/iptv/models/iptv_channel.dart';
+import 'package:simple_live_app/modules/iptv/models/iptv_source.dart';
 import 'package:simple_live_app/services/bilibili_account_service.dart';
 import 'package:simple_live_app/services/db_service.dart';
 import 'package:udp/udp.dart';
@@ -197,6 +201,7 @@ class SyncService extends GetxService {
       serverRouter.post('/sync/history', _syncHistoryReuqest);
       serverRouter.post('/sync/blocked_word', _syncBlockedWordReuqest);
       serverRouter.post('/sync/account/bilibili', _syncBiliAccountReuqest);
+      serverRouter.post('/sync/iptv', _syncIptvRequest);
 
       var server = await shelf_io.serve(
         serverRouter,
@@ -390,8 +395,45 @@ class SyncService extends GetxService {
     }
   }
 
-  shelf.Response toJsonResponse(Map<String, dynamic> data) {
-    return shelf.Response.ok(
+  /// 同步自定义直播源（源 + 频道）
+  ///
+  /// 频道一起传，否则接收端要等下一次自动更新才有频道列表，
+  /// 播放列表里的顺序（order）也会丢。
+  Future<shelf.Response> _syncIptvRequest(shelf.Request request) async {
+    try {
+      var overlay =
+          int.parse(request.requestedUri.queryParameters['overlay'] ?? '0');
+      var body = await request.readAsString();
+      Log.d('_syncIptvRequest: ${body.length} bytes');
+      var jsonBody = json.decode(body);
+      if (overlay == 1) {
+        await IptvService.instance.sourceBox.clear();
+        await IptvService.instance.channelBox.clear();
+      }
+      for (var item in jsonBody['sources'] ?? []) {
+        var source = IptvSource.fromJson(item);
+        await IptvService.instance.sourceBox.put(source.id, source);
+      }
+      for (var item in jsonBody['channels'] ?? []) {
+        var channel = IptvChannel.fromJson(item);
+        await IptvService.instance.channelBox.put(channel.id, channel);
+      }
+      IptvService.instance.clearEpgCache();
+      IptvTabRefresher.refreshAll();
+      SmartDialog.showToast('已同步自定义直播源');
+      return toJsonResponse({
+        'status': true,
+        'message': 'success',
+      });
+    } catch (e) {
+      return toJsonResponse({
+        'status': false,
+        'message': e.toString(),
+      });
+    }
+  }
+
+  shelf.Response toJsonResponse(Map<String, dynamic> data) {    return shelf.Response.ok(
       json.encode(data),
       headers: {
         'Content-Type': 'application/json',

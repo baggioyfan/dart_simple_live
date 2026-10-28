@@ -82,6 +82,17 @@ class IptvService extends GetxService {
   IptvChannel? getChannel(String channelId) =>
       channelBox.containsKey(channelId) ? channelBox.get(channelId) : null;
 
+  /// 所有源下的全部频道，按「源顺序 + 播放列表顺序」
+  ///
+  /// 备份 / 导出配置时用，保证还原后的顺序和导出时一致。
+  List<IptvChannel> getAllChannels() {
+    final result = <IptvChannel>[];
+    for (final source in getSources()) {
+      result.addAll(getChannels(source.id));
+    }
+    return result;
+  }
+
   /// 取某个源下出现过的分组，保持播放列表中的原始顺序
   List<String> getGroups(String sourceId) {
     final seen = <String>{};
@@ -217,6 +228,12 @@ class IptvService extends GetxService {
   ///
   /// 频道列表这类不该被网络拖慢的地方用它，拿不到就当没有节目单。
   XmltvGuide? cachedEpg(String sourceId) => _epgCache[sourceId];
+
+  /// 清空全部节目单缓存（恢复备份、导入配置后调用）
+  void clearEpgCache() {
+    _epgCache.clear();
+    _epgCacheTime.clear();
+  }
 
   /// 读取节目单，内存缓存 [IptvService._epgTtl]
   Future<XmltvGuide?> loadEpg(String sourceId, {bool force = false}) async {

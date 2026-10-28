@@ -57,6 +57,15 @@ class SyncDevicePage extends GetView<SyncDeviceController> {
                 ),
                 AppStyle.divider,
                 ListTile(
+                  leading: const Icon(Icons.live_tv),
+                  title: const Text("同步自定义直播源"),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    controller.syncIptv();
+                  },
+                ),
+                AppStyle.divider,
+                ListTile(
                   leading: const Icon(Remix.account_circle_line),
                   title: const Text("同步哔哩哔哩账号"),
                   trailing: const Icon(Icons.chevron_right),
