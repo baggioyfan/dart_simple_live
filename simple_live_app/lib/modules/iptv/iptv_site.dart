@@ -74,6 +74,33 @@ class IptvSite extends LiveSite {
   }
 
   @override
+  Future<LiveCategoryResult> getRecommendRooms({int page = 1}) async {
+    // 父类默认返回空列表，不重写的话首页的「自定义源」tab 永远是空白。
+    // 这里把所有启用源的频道按「分组顺序 + 组内顺序」摊平，顺序与分类页一致。
+    final channels = <IptvChannel>[];
+    for (final source in _service.getEnabledSources()) {
+      for (final group in _service.getGroups(source.id)) {
+        channels.addAll(_service.getChannelsByGroup(source.id, group));
+      }
+    }
+
+    const pageSize = 60;
+    final start = (page - 1) * pageSize;
+    if (start >= channels.length) {
+      return LiveCategoryResult(hasMore: false, items: <LiveRoomItem>[]);
+    }
+    final end = start + pageSize;
+    final slice = channels.sublist(
+      start,
+      end > channels.length ? channels.length : end,
+    );
+    return LiveCategoryResult(
+      hasMore: end < channels.length,
+      items: slice.map((e) => _toRoomItem(e)).toList(),
+    );
+  }
+
+  @override
   Future<LiveRoomDetail> getRoomDetail({required String roomId}) async {
     final channel = _service.getChannel(roomId);
     if (channel == null) {

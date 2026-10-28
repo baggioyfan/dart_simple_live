@@ -16,6 +16,7 @@ class IptvChannel {
     this.channelNumber,
     this.catchupMode = '',
     this.catchupSource = '',
+    this.order = 0,
   });
 
   /// 频道ID = 源ID + 频道标识，全局唯一
@@ -48,6 +49,12 @@ class IptvChannel {
   /// 回看地址模板
   String catchupSource;
 
+  /// 在播放列表中的序号，从 0 开始
+  ///
+  /// 分组顺序和组内顺序都直接沿用它 —— Hive 的 `Box.values` 不保证按写入顺序
+  /// 迭代，重启后拿到的顺序和导入时看到的不一样，所以必须把顺序显式存下来。
+  int order;
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'sourceId': sourceId,
@@ -59,6 +66,7 @@ class IptvChannel {
         'channelNumber': channelNumber,
         'catchupMode': catchupMode,
         'catchupSource': catchupSource,
+        'order': order,
       };
 
   factory IptvChannel.fromJson(Map<String, dynamic> json) => IptvChannel(
@@ -72,6 +80,7 @@ class IptvChannel {
         channelNumber: json['channelNumber'] as int?,
         catchupMode: (json['catchupMode'] ?? '') as String,
         catchupSource: (json['catchupSource'] ?? '') as String,
+        order: (json['order'] ?? 0) as int,
       );
 }
 
@@ -96,13 +105,15 @@ class IptvChannelAdapter extends TypeAdapter<IptvChannel> {
       channelNumber: fields[7] as int?,
       catchupMode: (fields[8] ?? '') as String,
       catchupSource: (fields[9] ?? '') as String,
+      // 老数据没有这一列，读出来是 null，落到 0 由 IptvService 统一迁移
+      order: (fields[10] ?? 0) as int,
     );
   }
 
   @override
   void write(BinaryWriter writer, IptvChannel obj) {
     writer
-      ..writeByte(10)
+      ..writeByte(11)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -122,6 +133,8 @@ class IptvChannelAdapter extends TypeAdapter<IptvChannel> {
       ..writeByte(8)
       ..write(obj.catchupMode)
       ..writeByte(9)
-      ..write(obj.catchupSource);
+      ..write(obj.catchupSource)
+      ..writeByte(10)
+      ..write(obj.order);
   }
 }

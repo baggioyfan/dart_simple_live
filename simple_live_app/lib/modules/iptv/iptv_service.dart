@@ -38,6 +38,7 @@ class IptvService extends GetxService {
   Future init() async {
     sourceBox = await Hive.openBox('IptvSource');
     channelBox = await Hive.openBox('IptvChannel');
+    await _migrateLegacyOrder();
   }
 
   // ---------------- 源 ----------------
@@ -67,8 +68,16 @@ class IptvService extends GetxService {
 
   // ---------------- 频道 ----------------
 
-  List<IptvChannel> getChannels(String sourceId) =>
-      channelBox.values.where((e) => e.sourceId == sourceId).toList();
+  /// 某个源下的全部频道，按播放列表里的原始顺序
+  ///
+  /// 不能直接用 `channelBox.values`：Hive 不保证按写入顺序迭代，
+  /// 重启后分组和组内顺序都会跟导入时看到的不一样，所以统一按 [IptvChannel.order] 排。
+  List<IptvChannel> getChannels(String sourceId) {
+    final list =
+        channelBox.values.where((e) => e.sourceId == sourceId).toList();
+    list.sort((a, b) => a.order.compareTo(b.order));
+    return list;
+  }
 
   IptvChannel? getChannel(String channelId) =>
       channelBox.containsKey(channelId) ? channelBox.get(channelId) : null;
@@ -265,6 +274,22 @@ class IptvService extends GetxService {
   }
 
   // ---------------- 内部 ----------------
+
+  /// 给早期版本存的频道补顺序
+  ///
+  /// 那时候还没存 [IptvChannel.order]，一个源下的频道全是 0，排序等于没排。
+  /// 没法凭空还原原始位置，只能把这类源标成「待更新」，交给定期更新服务重拉一次。
+  /// 重拉之后 order 变成 0..n-1，这段逻辑就不会再命中。
+  Future<void> _migrateLegacyOrder() async {
+    for (final source in sourceBox.values.toList()) {
+      final channels =
+          channelBox.values.where((e) => e.sourceId == source.id).toList();
+      if (channels.length < 2) continue;
+      if (!channels.every((e) => e.order == 0)) continue;
+      source.lastUpdate = null;
+      await sourceBox.put(source.id, source);
+    }
+  }
 
   Future<String> _fetchText(String url) async {
     try {

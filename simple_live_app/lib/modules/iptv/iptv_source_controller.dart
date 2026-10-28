@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/modules/iptv/iptv_auto_refresh_service.dart';
 import 'package:simple_live_app/modules/iptv/iptv_service.dart';
+import 'package:simple_live_app/modules/iptv/iptv_tab_refresher.dart';
 import 'package:simple_live_app/modules/iptv/models/iptv_source.dart';
 
 class IptvSourceController extends GetxController {
@@ -31,6 +32,9 @@ class IptvSourceController extends GetxController {
     sources.value = _service.getSources();
   }
 
+  /// 通知首页 / 分类页的自定义源 tab 重新拉一次数据
+  void _reloadLiveTabs() => IptvTabRefresher.refreshAll();
+
   void reloadAutoRefresh() {
     autoRefreshEnabled.value = _autoRefresh.enabled;
     autoRefreshHours.value = _autoRefresh.intervalHours;
@@ -42,9 +46,10 @@ class IptvSourceController extends GetxController {
     busy.value = true;
     SmartDialog.showLoading(msg: "正在拉取播放列表");
     try {
-      await _service.importFromUrl(url: url, name: name);
+      final source = await _service.importFromUrl(url: url, name: name);
       reload();
-      SmartDialog.showToast("导入成功");
+      _reloadLiveTabs();
+      SmartDialog.showToast("导入成功，${source.channelCount} 个频道");
       return true;
     } catch (e) {
       Log.logPrint(e);
@@ -63,6 +68,7 @@ class IptvSourceController extends GetxController {
     try {
       await _service.refreshSource(source.id);
       reload();
+      _reloadLiveTabs();
       SmartDialog.showToast("已更新 ${_service.getChannels(source.id).length} 个频道");
     } catch (e) {
       Log.logPrint(e);
@@ -77,6 +83,7 @@ class IptvSourceController extends GetxController {
     source.enabled = !source.enabled;
     await _service.updateSource(source);
     reload();
+    _reloadLiveTabs();
   }
 
   Future<void> rename(IptvSource source, String name) async {
@@ -85,11 +92,14 @@ class IptvSourceController extends GetxController {
     source.name = value;
     await _service.updateSource(source);
     reload();
+    // 分类页一级标题就是源名，改名后要跟着变
+    _reloadLiveTabs();
   }
 
   Future<void> remove(IptvSource source) async {
     await _service.deleteSource(source.id);
     reload();
+    _reloadLiveTabs();
     SmartDialog.showToast("已删除");
   }
 
@@ -117,6 +127,7 @@ class IptvSourceController extends GetxController {
     try {
       await _service.refreshAll();
       reload();
+      _reloadLiveTabs();
       SmartDialog.showToast("已更新 ${sources.length} 个源");
     } catch (e) {
       Log.logPrint(e);

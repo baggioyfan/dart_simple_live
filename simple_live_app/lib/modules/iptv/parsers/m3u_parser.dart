@@ -157,6 +157,8 @@ class M3uParser {
           channelNumber: int.tryParse((attrs['tvg-chno'] ?? '').trim()),
           catchupMode: (attrs['catchup'] ?? catchupMode).trim(),
           catchupSource: (attrs['catchup-source'] ?? catchupSource).trim(),
+          // 记住它在播放列表里的位置，后续排序全靠这个
+          order: channels.length,
         ),
       );
     }

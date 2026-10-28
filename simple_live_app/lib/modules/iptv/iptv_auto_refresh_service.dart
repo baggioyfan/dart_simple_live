@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:get/get.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/modules/iptv/iptv_service.dart';
+import 'package:simple_live_app/modules/iptv/iptv_tab_refresher.dart';
 import 'package:simple_live_app/services/local_storage_service.dart';
 
 /// IPTV 直播源自动更新
@@ -80,6 +81,8 @@ class IptvAutoRefreshService extends GetxService {
       );
       if (count > 0) {
         Log.logPrint("IPTV 自动更新了 $count 个源");
+        // 后台换了一批频道，正在看列表的页面要跟着换
+        IptvTabRefresher.refreshAll();
       }
       return count;
     } catch (e) {
