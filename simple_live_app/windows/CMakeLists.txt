@@ -32,6 +32,16 @@ set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE}")
 # Use Unicode for all projects.
 add_definitions(-DUNICODE -D_UNICODE)
 
+# MSVC 14.5x（windows-latest 上的 VS 18 / 14.51.36231）把 <experimental/coroutine>
+# 的弃用提示升级成了硬错误：
+#   error C2338: static assertion failed: 'error STL1011: The /await compiler option,
+#   <experimental/coroutine>, ... are deprecated by Microsoft and will be REMOVED SOON.'
+# flutter_inappwebview_windows 和 permission_handler_windows 两个插件还在用它，
+# 不压下去 Windows 包会直接编译失败。定义这个宏把错误降回警告。
+# 放在这里而不是各插件的 CMakeLists 里，是因为顶层 add_definitions 会传播给之后
+# add_subdirectory 进来的目录 —— generated_plugins.cmake 在文件末尾才 include。
+add_definitions(-D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
+
 # Compilation settings that should be applied to most targets.
 #
 # Be cautious about adding new options here, as plugins use this function by
