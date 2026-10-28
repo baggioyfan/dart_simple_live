@@ -55,6 +55,18 @@ jobs:
       - name: Enable Flutter Desktop
         run: flutter config --enable-macos-desktop
 
+      - name: Pin connectivity_plus to 7.0.0 for the macOS SDK
+        # macos-15 / macos-15-intel 只有 Xcode 16.4（macOS 15.5 SDK），
+        # connectivity_plus 7.1.0+ 的 NWPath.isUltraConstrained 编译不过：
+        #   PathMonitorConnectivityProvider.swift:29:42: error: value of type
+        #   'NWPath' has no member 'isUltraConstrained'
+        # 用 pub 的局部覆盖降到 7.0.0（pubspec.yaml / pubspec.lock 不动）。
+        # 与 fqapp 的 macos.yml 同一套做法。
+        run: |
+          cd simple_live_app
+          printf 'dependency_overrides:\n  connectivity_plus: 7.0.0\n' > pubspec_overrides.yaml
+          cat pubspec_overrides.yaml
+
       - name: Restore packages
         run: |
           cd simple_live_app
