@@ -6,6 +6,9 @@ on:
   push:
     branches:
       - "feat/**"
+      # 合进 master 也要跑一次：feat 分支上的检查只能证明「合并前是好的」，
+      # 合并后的结果（尤其是解冲突时手工动过的地方）没人验证过。
+      - "master"
 
 jobs:
   analyze:
