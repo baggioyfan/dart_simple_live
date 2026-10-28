@@ -175,16 +175,20 @@ class IptvService extends GetxService {
     }
   }
 
-  /// 只刷新超过 [maxAge] 的源，返回实际刷新的数量
+  /// 只刷新"该更新了"的源，返回实际刷新的数量
   ///
-  /// 赛事类频道（体育-今天/昨天/明天）会按日期滚动，播放列表内容每天都变，
-  /// 所以需要定期重拉，不能只在导入时取一次。
+  /// 判定条件是「超过 [maxAge] **或** 跨了自然日」：
+  /// 赛事类分组直接叫「体育-今天10-28」，播放列表每天都换一份，
+  /// 所以哪怕间隔没到，只要日历翻页了就必须重拉。
   Future<int> refreshIfStale({required Duration maxAge}) async {
     var count = 0;
     final now = DateTime.now();
     for (final source in getEnabledSources()) {
       final last = source.lastUpdate;
-      if (last != null && now.difference(last) < maxAge) continue;
+      final fresh = last != null &&
+          now.difference(last) < maxAge &&
+          _isSameDay(last, now);
+      if (fresh) continue;
       try {
         await refreshSource(source.id);
         count++;
@@ -194,6 +198,9 @@ class IptvService extends GetxService {
     }
     return count;
   }
+
+  bool _isSameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
 
   // ---------------- EPG ----------------
 
