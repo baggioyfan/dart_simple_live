@@ -1,7 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'package:auto_orientation_v2/auto_orientation_v2.dart';
-import 'package:device_info_plus/device_info_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:floating/floating.dart';
 import 'package:flutter/material.dart';
@@ -224,8 +222,6 @@ mixin PlayerDanmakuMixin on PlayerStateMixin {
   }
 }
 mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
-  final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
-
   final pip = Floating();
   StreamSubscription<PiPStatus>? _pipSubscription;
 
@@ -346,36 +342,22 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
   }
 
   /// 设置横屏
+  ///
+  /// 原来 iOS 16 以下走 auto_orientation_v2 插件（SystemChrome 在旧版 iOS 上
+  /// 不生效），其余平台走 SystemChrome。现在 iOS 构建已经停用，而那个插件的
+  /// 2.4.1–2.4.7 全都漏了 apply plugin: 'kotlin-android'，Kotlin 源码根本不
+  /// 编译，APK 会报 GeneratedPluginRegistrant 找不到 AutoOrientationPlugin。
+  /// 于是干脆去掉这个依赖，统一用 SystemChrome。
   Future setLandscapeOrientation() async {
-    if (await beforeIOS16()) {
-      AutoOrientation.landscapeAutoMode();
-    } else {
-      SystemChrome.setPreferredOrientations([
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
-    }
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
   }
 
   /// 设置竖屏
   Future setPortraitOrientation() async {
-    if (await beforeIOS16()) {
-      AutoOrientation.portraitAutoMode();
-    } else {
-      await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
-    }
-  }
-
-  /// 是否是IOS16以下
-  Future<bool> beforeIOS16() async {
-    if (Platform.isIOS) {
-      var info = await deviceInfo.iosInfo;
-      var version = info.systemVersion;
-      var versionInt = int.tryParse(version.split('.').first) ?? 0;
-      return versionInt < 16;
-    } else {
-      return false;
-    }
+    await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
   }
 
   Future saveScreenshot() async {

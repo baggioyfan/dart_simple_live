@@ -56,12 +56,11 @@ dependencies:
   permission_handler: ^12.0.1 #权限处理
   image_gallery_saver_plus: ^4.0.1 #图片保存到相册
   screen_brightness: ^2.1.7 #亮度控制
-  # 锁死 2.4.6，不要写 ^2.3.6。2.4.7 的 android/build.gradle 末尾加了
-  #   kotlin { compilerOptions { jvmTarget = "JVM_17" } }
-  # 却没有 apply plugin: 'kotlin-android'，Gradle 在配置阶段直接报
-  #   Could not find method kotlin() for arguments [...] on project ':auto_orientation_v2'
-  # 整个 APK 构建就挂了。等上游修好再放开版本约束。
-  auto_orientation_v2: 2.4.6 #屏幕方向
+  # auto_orientation_v2 已移除：2.4.1–2.4.7 全都漏了 apply plugin:
+  # 'kotlin-android'（2.4.7 还额外用了 kotlin{} 却没应用插件），Kotlin 源码
+  # 不会被编译，APK 阶段报 GeneratedPluginRegistrant 找不到
+  # AutoOrientationPlugin。它的作用只是 iOS 16 以下的横竖屏，现在 iOS 构建
+  # 已停用，直接改用 Flutter 自带的 SystemChrome.setPreferredOrientations。
   wakelock_plus: ^1.4.0 #屏幕常亮
   file_picker: ^10.3.7 #文件选择
   window_manager: ^0.5.1 #窗口管理
