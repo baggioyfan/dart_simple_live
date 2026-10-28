@@ -2,18 +2,28 @@ name: macos-build
 
 # 只构建 macOS，手动触发。
 # 不依赖 dev 分支，不需要 Android/TV 签名 secrets；TOKEN 仅在填写 tag_name 发 Release 时需要。
+#
+# runner 选择（与 fqapp 的 macos.yml 保持一致）：
+#   macos-15       → macOS 15 arm64，标准 GA 镜像，容量充足，默认用它
+#   macos-15-intel → macOS 15 x64，GitHub 唯一的免费 x86_64 macOS runner
+#   macos-latest   → 现在指向 macOS 26 arm64，最新镜像容量最紧，容易排队 15 分钟
+#                    后被判 "not acquired by Runner" 直接取消（实测踩过）
+#   注意 macos-14 系列已 deprecated，macos-14-large（x64）还是付费 larger runner
+#
+# 产物最低系统由 macos/Podfile 与 Runner.xcodeproj 决定，当前是 10.14，
+# 所以 x64 包在 macOS 14 的 Intel 机器上可直接运行。
 on:
   workflow_dispatch:
     inputs:
       runner:
-        description: "运行器：macos-latest/macos-15 为 arm64，macos-15-intel 为 x64（arm64 常因容量不足排队）"
+        description: "运行器：macos-15=arm64（默认，池子大不排队）；macos-15-intel=x64；macos-latest=macOS 26 arm64（最新镜像，常因容量不足排队甚至被取消）"
         type: choice
         required: false
-        default: macos-latest
+        default: macos-15
         options:
-          - macos-latest
           - macos-15
           - macos-15-intel
+          - macos-latest
       tag_name:
         description: "可选：填了就发 Release（如 v8.0.0）；留空只上传 Artifact"
         required: false
