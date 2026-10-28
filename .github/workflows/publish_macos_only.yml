@@ -41,10 +41,12 @@ jobs:
           ref: master
 
       - name: Show runner info
+        id: meta
         run: |
           echo "runner label: ${{ inputs.runner }}"
           uname -m
           sw_vers
+          echo "arch=$(uname -m)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -105,7 +107,9 @@ jobs:
       - name: Upload macOS to Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: macos-${{ replace(inputs.runner || 'macos-latest', 'macos-', '') }}
+          # 用 uname -m 区分架构。GitHub 表达式没有 replace()，
+          # 早前用 replace(inputs.runner, 'macos-', '') 导致整个 workflow 被判非法。
+          name: macos-${{ steps.meta.outputs.arch }}
           if-no-files-found: warn
           path: |
             simple_live_app/build/dist/*/*.dmg
