@@ -433,7 +433,8 @@ class SyncService extends GetxService {
     }
   }
 
-  shelf.Response toJsonResponse(Map<String, dynamic> data) {    return shelf.Response.ok(
+  shelf.Response toJsonResponse(Map<String, dynamic> data) {
+    return shelf.Response.ok(
       json.encode(data),
       headers: {
         'Content-Type': 'application/json',
