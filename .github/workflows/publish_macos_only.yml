@@ -87,10 +87,25 @@ jobs:
         if: always()
         run: find simple_live_app/build/dist -type f 2>/dev/null || echo "no dist output"
 
+      - name: Verify architecture
+        if: always()
+        run: |
+          BIN=$(ls -d simple_live_app/build/macos/Build/Products/Release/*.app/Contents/MacOS/* 2>/dev/null | head -1)
+          if [ -z "$BIN" ]; then
+            echo "app bundle not found, skip"; exit 0
+          fi
+          echo "binary: $BIN"
+          echo "--- lipo ---"
+          lipo -info "$BIN" || true
+          echo "--- file ---"
+          file "$BIN" || true
+          echo "--- min system ---"
+          otool -l "$BIN" | grep -A4 LC_BUILD_VERSION | grep minos || true
+
       - name: Upload macOS to Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: macos
+          name: macos-${{ inputs.runner || 'macos-latest' }}
           if-no-files-found: warn
           path: |
             simple_live_app/build/dist/*/*.dmg
