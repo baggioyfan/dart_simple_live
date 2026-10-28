@@ -7,6 +7,8 @@ import 'package:simple_live_app/modules/indexed/indexed_controller.dart';
 import 'package:simple_live_app/modules/live_room/live_room_controller.dart';
 import 'package:simple_live_app/modules/live_room/live_room_page.dart';
 import 'package:simple_live_app/modules/settings/follow_settings_page.dart';
+import 'package:simple_live_app/modules/iptv/iptv_source_controller.dart';
+import 'package:simple_live_app/modules/iptv/iptv_source_page.dart';
 import 'package:simple_live_app/modules/sync/remote_sync/webdav/remote_sync_webdav_config_page.dart';
 import 'package:simple_live_app/modules/sync/remote_sync/webdav/remote_sync_webdav_controller.dart';
 import 'package:simple_live_app/modules/sync/remote_sync/webdav/remote_sync_webdav_page.dart';
@@ -247,6 +249,12 @@ class AppPages {
     GetPage(
       name: RoutePath.kSettingsFollow,
       page: () => const FollowSettingsPage(),
+    ),
+    //IPTV 自定义直播源
+    GetPage(
+      name: RoutePath.kIptvSources,
+      page: () => const IptvSourcePage(),
+      binding: BindingsBuilder.put(() => IptvSourceController()),
     ),
   ];
 }

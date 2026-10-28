@@ -1,0 +1,32 @@
+name: dart-check
+
+# 静态分析校验：只让真正的编译错误失败，lint 的 info/warning 不拦 CI
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "feat/**"
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.38.3"
+          channel: stable
+          cache: true
+
+      - name: Restore packages
+        run: |
+          cd simple_live_app
+          flutter pub get
+
+      - name: Analyze
+        run: |
+          cd simple_live_app
+          flutter analyze --no-fatal-infos --no-fatal-warnings

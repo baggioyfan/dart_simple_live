@@ -1,52 +1,103 @@
 name: macos-build
 
-# 只构建 macOS，手动触发。
-# 不依赖 dev 分支，不需要 Android/TV 签名 secrets；TOKEN 仅在填写 tag_name 发 Release 时需要。
+# 只构建 macOS，手动触发。不依赖 dev 分支，不需要 Android/TV 签名 secrets。
 #
-# runner 选择（与 fqapp 的 macos.yml 保持一致）：
-#   macos-15       → macOS 15 arm64，标准 GA 镜像，容量充足，默认用它
-#   macos-15-intel → macOS 15 x64，GitHub 唯一的免费 x86_64 macOS runner
-#   macos-latest   → 现在指向 macOS 26 arm64，最新镜像容量最紧，容易排队 15 分钟
-#                    后被判 "not acquired by Runner" 直接取消（实测踩过）
-#   注意 macos-14 系列已 deprecated，macos-14-large（x64）还是付费 larger runner
+# 架构拆分（做法与 fqapp 的 macos.yml 一致）：
+#   arm64 与 x86_64 各跑一个 job，在各自的原生 runner 上构建，每个包只含单一架构。
+#   这样 libmpv 只会链进目标 slice（universal 压缩 28.8MB → 单架构 ~14MB），
+#   包体大约能砍一半。代价是 arm64 包不能跑在 Intel Mac 上，反之亦然。
 #
-# 产物最低系统由 macos/Podfile 与 Runner.xcodeproj 决定，当前是 10.14，
-# 所以 x64 包在 macOS 14 的 Intel 机器上可直接运行。
+# runner 对应关系：
+#   arm64  → macos-15        （M1，GA，池子大，几乎不排队）
+#   x86_64 → macos-15-intel  （GitHub 唯一的免费 x86_64 macOS runner）
+#   macos-latest 现在指向 macOS 26 arm64，最新镜像容量最紧，实测排队 15 分钟后
+#   被判 "not acquired by Runner" 直接取消；macos-14 系列已 deprecated；
+#   macos-14-large（x64）是付费 larger runner。
+#
+# 最低系统由 macos/Podfile 与 Runner.xcodeproj 决定（当前 10.14），
+# 与 runner 的操作系统版本无关。
 on:
   workflow_dispatch:
     inputs:
-      runner:
-        description: "运行器：macos-15=arm64（默认，池子大不排队）；macos-15-intel=x64；macos-latest=macOS 26 arm64（最新镜像，常因容量不足排队甚至被取消）"
+      arch:
+        description: "目标架构：both = 两个都出，各自独立包"
         type: choice
         required: false
-        default: macos-15
+        default: both
         options:
-          - macos-15
-          - macos-15-intel
-          - macos-latest
+          - both
+          - arm64
+          - x86_64
       tag_name:
         description: "可选：填了就发 Release（如 v8.0.0）；留空只上传 Artifact"
         required: false
         default: ""
+      ref:
+        description: "可选：要构建的分支/标签；留空 = 当前触发这次运行的分支"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: macos-${{ github.ref }}-${{ inputs.arch }}
+  cancel-in-progress: true
 
 jobs:
+  # 目标架构要在 job 开始前定下来，而 matrix 是静态的，所以先用一个极轻的 job
+  # 把「这次该编哪些架构」算成 JSON —— job 级 if 拿不到 matrix 上下文。
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - name: Resolve the architecture matrix
+        id: set
+        env:
+          REQUESTED: ${{ inputs.arch }}
+        run: |
+          want="${REQUESTED:-both}"
+          arm64_leg='{"arch":"arm64","runner":"macos-15","artifact":"macos-arm64"}'
+          x64_leg='{"arch":"x86_64","runner":"macos-15-intel","artifact":"macos-x86_64"}'
+          case "$want" in
+            both)   legs="[$arm64_leg,$x64_leg]" ;;
+            arm64)  legs="[$arm64_leg]" ;;
+            x86_64) legs="[$x64_leg]" ;;
+            *)
+              echo "::error::arch 只能是 both / arm64 / x86_64（收到 '$want'）"
+              exit 1
+              ;;
+          esac
+          printf 'matrix={"include":%s}\n' "$legs" >> "$GITHUB_OUTPUT"
+          printf '本次构建：%s\n' "$want" >> "$GITHUB_STEP_SUMMARY"
+
   build-macos:
-    runs-on: ${{ inputs.runner || 'macos-latest' }}
-    permissions:
-      contents: write
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      # 整 job 生效：macos/Podfile 的 post_install 读它，让 Pods 也只编目标架构。
+      # pod install 可能在 pub get / build 任意一步被触发，放 job 级最稳。
+      CI_MACOS_ARCH: ${{ matrix.arch }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: master
+          # 原来写死 ref: master，导致在功能分支上手动触发也只会构建 master。
+          ref: ${{ inputs.ref || github.ref_name }}
 
       - name: Show runner info
-        id: meta
         run: |
-          echo "runner label: ${{ inputs.runner }}"
+          echo "target arch: ${{ matrix.arch }}"
+          echo "runner label: ${{ matrix.runner }}"
           uname -m
           sw_vers
-          echo "arch=$(uname -m)" >> "$GITHUB_OUTPUT"
+          xcodebuild -version
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -73,6 +124,20 @@ jobs:
         run: |
           cd simple_live_app
           flutter pub get
+          echo "CI_MACOS_ARCH=$CI_MACOS_ARCH"
+
+      - name: Force single-arch build settings
+        # flutter_distributor 内部就是 `flutter build macos --release`，而
+        # `flutter build macos` 没有架构开关，只会按 ARCHS_STANDARD 出包
+        # （macOS 上默认就是 universal，arm64 + x86_64 都链进去）。
+        # 追加到 Release.xcconfig 末尾：xcconfig 后写的覆盖前面 include 里的值。
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          cd simple_live_app
+          printf '\n// CI: 本次只出 %s\nARCHS = %s\n' "$ARCH" "$ARCH" \
+            >> macos/Runner/Configs/Release.xcconfig
+          cat macos/Runner/Configs/Release.xcconfig
 
       - name: Install appdmg
         run: npm install -g appdmg
@@ -85,44 +150,119 @@ jobs:
           cd simple_live_app
           flutter_distributor package --platform macos --targets dmg,zip
 
-      - name: List build output
-        if: always()
-        run: find simple_live_app/build/dist -type f 2>/dev/null || echo "no dist output"
-
       - name: Verify architecture
-        if: always()
+        # 必须硬失败：宿主与目标同架构时这里最容易静默出成 universal，
+        # 那就等于白拆了一趟。第三方预编译产物（libmpv 等）缺 slice 的症状是
+        # 运行到播放页才崩，构建期先抓出来更省事。
+        env:
+          WANT: ${{ matrix.arch }}
         run: |
-          BIN=$(ls -d simple_live_app/build/macos/Build/Products/Release/*.app/Contents/MacOS/* 2>/dev/null | head -1)
-          if [ -z "$BIN" ]; then
-            echo "app bundle not found, skip"; exit 0
+          cd simple_live_app
+          APP=$(ls -d build/macos/Build/Products/Release/*.app 2>/dev/null | head -1)
+          if [ -z "$APP" ]; then
+            echo "::error::没找到 .app，构建产物路径变了？"
+            exit 1
           fi
+          echo "app: $APP"
+          BIN="$APP/Contents/MacOS/$(basename "$APP" .app)"
           echo "binary: $BIN"
-          echo "--- lipo ---"
+
+          echo "--- 主可执行文件 ---"
           lipo -info "$BIN" || true
-          echo "--- file ---"
           file "$BIN" || true
-          echo "--- min system ---"
-          otool -l "$BIN" | grep -A4 LC_BUILD_VERSION | grep minos || true
+          echo "--- 最低系统 ---"
+          otool -l "$BIN" | awk '/LC_BUILD_VERSION|LC_VERSION_MIN_MACOSX/ {f=1}
+                               f && /minos|version/ {print "  " $2; exit}' || true
+
+          # 新版 macOS 的 lipo 会把 arm64e 报成独立架构，比对前折叠回 arm64
+          norm() {
+            printf '%s\n' "$1" | tr ' ' '\n' \
+              | sed -E 's/^arm64e(\.[A-Za-z0-9_]+)?$/arm64/' | tr '\n' ' ' \
+              | sed -E 's/ +$//'
+          }
+          bad=0
+          check() {
+            local f="$1" got
+            case "$(file -b "$f" 2>/dev/null)" in
+              *Mach-O*) ;;
+              *) return 0 ;;
+            esac
+            got="$(norm "$(lipo -archs "$f" 2>/dev/null || true)")"
+            case " $got " in
+              *" $WANT "*) ;;
+              *)
+                echo "::error file=$f::架构为「${got:-未知}」，缺少 $WANT"
+                bad=1
+                ;;
+            esac
+          }
+          check "$BIN"
+          # 只扫 MacOS 与 Frameworks：flutter_assets 里上万个资源不是 Mach-O，
+          # 对整个 .app 逐个 file 只是白等。
+          for root in "$APP/Contents/MacOS" "$APP/Contents/Frameworks"; do
+            [ -d "$root" ] || continue
+            while IFS= read -r f; do check "$f"; done < <(find "$root" -type f)
+          done
+          [ "$bad" -eq 0 ] || { echo "::error::包内存在缺少 $WANT slice 的 Mach-O"; exit 1; }
+          echo "包内全部 Mach-O 均含 $WANT"
+
+          echo "--- Frameworks 架构（universal = 没切掉另一份）---"
+          for fw in "$APP/Contents/Frameworks"/*.framework; do
+            [ -d "$fw" ] || continue
+            n=$(basename "$fw" .framework)
+            b="$fw/Versions/A/$n"
+            [ -f "$b" ] || continue
+            printf '  %-36s %s\n' "$n" "$(lipo -archs "$b" 2>/dev/null)"
+          done
+
+          echo "--- 包内体积（回答「为什么这么大」）---"
+          du -sh "$APP" || true
+          du -sh "$APP/Contents/"* 2>/dev/null | sort -hr || true
+
+      - name: Collect artifacts
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          cd simple_live_app
+          mkdir -p dist
+          for f in build/dist/*/*.dmg build/dist/*/*.zip; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f")
+            stem="${base%.*}"
+            ext="${base##*.}"
+            # 两个架构的产物同名，必须带上架构后缀，否则用户分不清
+            cp "$f" "dist/${stem}-${ARCH}.${ext}"
+          done
+          ls -lh dist
 
       - name: Upload macOS to Artifacts
         uses: actions/upload-artifact@v4
         with:
-          # 用 uname -m 区分架构。GitHub 表达式没有 replace()，
-          # 早前用 replace(inputs.runner, 'macos-', '') 导致整个 workflow 被判非法。
-          name: macos-${{ steps.meta.outputs.arch }}
-          if-no-files-found: warn
-          path: |
-            simple_live_app/build/dist/*/*.dmg
-            simple_live_app/build/dist/*/*.zip
+          name: ${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 14
+          path: simple_live_app/dist/*
+
+  # 单独一个 job 发 Release：matrix 里两个 leg 同时创建同一个 release 会打架
+  publish:
+    needs: build-macos
+    if: inputs.tag_name != ''
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List files
+        run: ls -lh dist
 
       - name: Upload Release
-        if: inputs.tag_name != ''
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
+          # 不传 token 就用仓库自带的 GITHUB_TOKEN，这个仓库没有配 PAT
           tag_name: ${{ inputs.tag_name }}
           name: ${{ inputs.tag_name }}
           generate_release_notes: true
-          token: ${{ secrets.TOKEN }}
-          files: |
-            simple_live_app/build/dist/*/*.dmg
-            simple_live_app/build/dist/*/*.zip
+          files: dist/*

@@ -11,6 +11,7 @@ import 'package:simple_live_app/app/constant.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/app/utils.dart';
+import 'package:simple_live_app/modules/iptv/widgets/iptv_epg_panel.dart';
 import 'package:simple_live_app/modules/live_room/live_room_controller.dart';
 import 'package:simple_live_app/modules/live_room/player/player_controls.dart';
 import 'package:simple_live_app/services/follow_service.dart';
@@ -433,6 +434,19 @@ class LiveRoomPage extends GetView<LiveRoomController> {
   }
 
   Widget buildMessageArea() {
+    // 自定义源没有弹幕和聊天，把这块换成节目单
+    if (controller.site.id == Constant.kIptv) {
+      return Expanded(
+        child: Obx(
+          () => IptvEpgPanel(
+            key: ValueKey(controller.rxRoomId.value),
+            channelId: controller.rxRoomId.value,
+            onPlayCatchup: (url, _) => controller.playCustomUrl(url),
+            onBackToLive: controller.backToLive,
+          ),
+        ),
+      );
+    }
     return Expanded(
       child: DefaultTabController(
         length: controller.site.id == Constant.kBiliBili ? 4 : 3,

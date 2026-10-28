@@ -146,7 +146,6 @@ class LocalStorageService extends GetxService {
 
   /// 开启自动更新关注
   static const String kAutoUpdateFollowEnable = "AutoUpdateFollowEnable";
-
   /// 定时自动更新关注间隔（分钟）
   static const String kUpdateFollowDuration = "AutoUpdateFollowDuration";
 
@@ -167,6 +166,12 @@ class LocalStorageService extends GetxService {
 
   /// WebDAV_最后一次备份时间
   static const String kWebDAVLastRecoverTime = "kWebDAVLastRecoverTime";
+
+  /// 开启 IPTV 直播源自动更新
+  static const String kIptvAutoRefreshEnable = "IptvAutoRefreshEnable";
+
+  /// IPTV 直播源自动更新间隔（小时）
+  static const String kIptvAutoRefreshInterval = "IptvAutoRefreshInterval";
 
   late Box settingsBox;
   late Box<String> shieldBox;

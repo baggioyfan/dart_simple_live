@@ -409,6 +409,32 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     initPlaylist();
   }
 
+  /// 播放一个外部地址（IPTV 回看用）
+  ///
+  /// 不走 [site.liveSite.getPlayUrls]，直接把拼好的地址塞进播放列表。
+  void playCustomUrl(String url) {
+    final value = url.trim();
+    if (value.isEmpty) return;
+    playUrls.value = [value];
+    currentLineIndex = 0;
+    currentLineInfo.value = "线路1";
+    mediaErrorRetryCount = 0;
+    liveStatus.value = true;
+    initPlaylist();
+  }
+
+  /// 从回看切回直播
+  void backToLive() {
+    if (detail.value == null || qualites.isEmpty) {
+      refreshRoom();
+      return;
+    }
+    if (currentQuality < 0) {
+      currentQuality = 0;
+    }
+    getPlayUrl();
+  }
+
   void changePlayLine(int index) {
     currentLineIndex = index;
     //重置错误次数

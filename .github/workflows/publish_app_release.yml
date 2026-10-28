@@ -5,7 +5,26 @@ on:
     tags:
       - "v*"
 jobs:
-  build-mac-ios-android:
+  # macOS 要按架构拆成两个 job，而 matrix 是静态的、job 级 if 又拿不到 matrix
+  # 上下文，所以先用一个极轻的 job 把「这次编哪些架构」算成 JSON。
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - name: Resolve the macOS architecture matrix
+        id: set
+        run: |
+          # 两个架构都出，各自独立包。arm64 → macos-15（Apple Silicon 原生），
+          # x86_64 → macos-15-intel（GitHub 唯一的免费 x86_64 macOS runner）。
+          arm64_leg='{"arch":"arm64","runner":"macos-15","artifact":"macos-arm64"}'
+          x64_leg='{"arch":"x86_64","runner":"macos-15-intel","artifact":"macos-x86_64"}'
+          printf 'matrix={"include":[%s,%s]}\n' "$arm64_leg" "$x64_leg" >> "$GITHUB_OUTPUT"
+          printf '本次 macOS 构建：arm64 + x86_64\n' >> "$GITHUB_STEP_SUMMARY"
+
+  # 打包 Android + iOS（macOS 已拆到 build-macos，不再在这个 job 里出）
+  build-android-ios:
     runs-on: macos-latest
     permissions:
       contents: write
@@ -43,23 +62,11 @@ jobs:
           flutter-version: "3.38.x"
           cache: true
 
-      # 打开MAC Desktop支持
-      - name: Enable Flutter Desktop
-        run: flutter config --enable-macos-desktop
-
       #更新Flutter的packages
       - name: Restore packages
         run: |
           cd simple_live_app
           flutter pub get
-
-      # 安装appdmg npm install -g appdmg
-      - name: Install appdmg
-        run: npm install -g appdmg
-
-      # 设置flutter_distributor环境
-      - name: Install flutter_distributor
-        run: dart pub global activate flutter_distributor
 
       #打包APK
       - name: Build APK
@@ -101,21 +108,6 @@ jobs:
           path: |
             simple_live_app/build/ios/iphoneos/ios_no_sign.ipa
 
-      # 打包MAC
-      - name: Build MacOS
-        run: |
-          cd simple_live_app
-          flutter_distributor package --platform macos --targets dmg,zip --skip-clean
-
-      # 上传MAC至Artifacts
-      - name: Upload MacOS to Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: mac
-          path: |
-            simple_live_app/build/dist/*/*.dmg
-            simple_live_app/build/dist/*/*.zip
-
       #获取版本信息（自动从 Git Tag 提取）
       - name: Get version from tag
         id: version
@@ -130,16 +122,195 @@ jobs:
           name: "${{ steps.version.outputs.VERSION }}"
           generate_release_notes: true
           prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
-          token: ${{ secrets.TOKEN }}
+          # 用 Actions 自带的 token 就够，四个 job 都已经声明了 contents: write。
+          # 之前这里读 secrets.TOKEN，等于强制要求手建一个 PAT，是多余的。
+          token: ${{ secrets.GITHUB_TOKEN }}
           files: |
             simple_live_app/build/app/outputs/flutter-apk/app-x86_64-release.apk
             simple_live_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
             simple_live_app/build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
             simple_live_app/build/ios/iphoneos/ios_no_sign.ipa
-            simple_live_app/build/dist/*/*.dmg
-            simple_live_app/build/dist/*/*.zip
       #完成
       - run: echo "🍏 This job's status is ${{ job.status }}."
+
+  # 打包 macOS：按架构拆成两个 job，各自在原生 runner 上编，每个包只含单一架构。
+  # 不拆的话 `flutter build macos` 会按 ARCHS_STANDARD 出 universal 包，
+  # libmpv 的 arm64 + x86_64 两份 slice 都会链进去（zip 22MB → 42MB）。
+  build-macos:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      # 整 job 生效：macos/Podfile 的 post_install 读它，让 Pods 也只编目标架构。
+      # pod install 可能在 pub get / build 任意一步被触发，放 job 级最稳。
+      CI_MACOS_ARCH: ${{ matrix.arch }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Show runner info
+        run: |
+          echo "target arch: ${{ matrix.arch }}"
+          uname -m
+          sw_vers
+          xcodebuild -version
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.38.x"
+          cache: true
+
+      - name: Enable Flutter Desktop
+        run: flutter config --enable-macos-desktop
+
+      - name: Pin connectivity_plus to 7.0.0 for the macOS SDK
+        # macos-15 / macos-15-intel 只有 Xcode 16.4（macOS 15.5 SDK），
+        # connectivity_plus 7.1.0+ 的 NWPath.isUltraConstrained 编译不过：
+        #   PathMonitorConnectivityProvider.swift:29:42: error: value of type
+        #   'NWPath' has no member 'isUltraConstrained'
+        # 用 pub 的局部覆盖降到 7.0.0（pubspec.yaml / pubspec.lock 不动）。
+        run: |
+          cd simple_live_app
+          printf 'dependency_overrides:\n  connectivity_plus: 7.0.0\n' > pubspec_overrides.yaml
+          cat pubspec_overrides.yaml
+
+      - name: Restore packages
+        run: |
+          cd simple_live_app
+          flutter pub get
+          echo "CI_MACOS_ARCH=$CI_MACOS_ARCH"
+
+      - name: Force single-arch build settings
+        # flutter_distributor 内部就是 `flutter build macos --release`，而它没有
+        # 架构开关，只会按 ARCHS_STANDARD 出包。追加到 Release.xcconfig 末尾：
+        # xcconfig 后写的覆盖前面 include 进来的值。
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          cd simple_live_app
+          printf '\n// CI: 本次只出 %s\nARCHS = %s\n' "$ARCH" "$ARCH" \
+            >> macos/Runner/Configs/Release.xcconfig
+          cat macos/Runner/Configs/Release.xcconfig
+
+      - name: Install appdmg
+        run: npm install -g appdmg
+
+      - name: Install flutter_distributor
+        run: dart pub global activate flutter_distributor
+
+      - name: Build macOS (dmg + zip)
+        run: |
+          cd simple_live_app
+          flutter_distributor package --platform macos --targets dmg,zip
+
+      - name: Verify architecture
+        # 必须硬失败：宿主与目标同架构时最容易静默出成 universal，那就等于白拆。
+        # 第三方预编译产物（libmpv 等）缺 slice 的症状是运行到播放页才崩，
+        # 构建期先抓出来更省事。
+        env:
+          WANT: ${{ matrix.arch }}
+        run: |
+          cd simple_live_app
+          APP=$(ls -d build/macos/Build/Products/Release/*.app 2>/dev/null | head -1)
+          if [ -z "$APP" ]; then
+            echo "::error::没找到 .app，构建产物路径变了？"
+            exit 1
+          fi
+          BIN="$APP/Contents/MacOS/$(basename "$APP" .app)"
+          echo "app: $APP"
+          lipo -info "$BIN" || true
+
+          # 新版 macOS 的 lipo 会把 arm64e 报成独立架构，比对前折叠回 arm64
+          norm() {
+            printf '%s\n' "$1" | tr ' ' '\n' \
+              | sed -E 's/^arm64e(\.[A-Za-z0-9_]+)?$/arm64/' | tr '\n' ' ' \
+              | sed -E 's/ +$//'
+          }
+          bad=0
+          check() {
+            local f="$1" got
+            case "$(file -b "$f" 2>/dev/null)" in
+              *Mach-O*) ;;
+              *) return 0 ;;
+            esac
+            got="$(norm "$(lipo -archs "$f" 2>/dev/null || true)")"
+            case " $got " in
+              *" $WANT "*) ;;
+              *)
+                echo "::error file=$f::架构为「${got:-未知}」，缺少 $WANT"
+                bad=1
+                ;;
+            esac
+          }
+          check "$BIN"
+          # 只扫 MacOS 与 Frameworks：flutter_assets 里上万个资源不是 Mach-O
+          for root in "$APP/Contents/MacOS" "$APP/Contents/Frameworks"; do
+            [ -d "$root" ] || continue
+            while IFS= read -r f; do check "$f"; done < <(find "$root" -type f)
+          done
+          [ "$bad" -eq 0 ] || { echo "::error::包内存在缺少 $WANT slice 的 Mach-O"; exit 1; }
+          echo "包内全部 Mach-O 均含 $WANT"
+
+      - name: Collect artifacts
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          cd simple_live_app
+          mkdir -p dist
+          for f in build/dist/*/*.dmg build/dist/*/*.zip; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f")
+            stem="${base%.*}"
+            ext="${base##*.}"
+            # 两个架构的产物同名，必须带架构后缀，否则用户分不清
+            cp "$f" "dist/${stem}-${ARCH}.${ext}"
+          done
+          ls -lh dist
+
+      - name: Upload macOS to Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 14
+          path: simple_live_app/dist/*
+
+  # 单独一个 job 往 Release 传 macOS：matrix 两个 leg 同时创建同一个 release 会打架
+  publish-macos:
+    needs: build-macos
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List files
+        run: ls -lh dist
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Upload macOS to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "${{ steps.version.outputs.VERSION }}"
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
+          # 用 Actions 自带的 token 就够，四个 job 都已经声明了 contents: write。
+          # 之前这里读 secrets.TOKEN，等于强制要求手建一个 PAT，是多余的。
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: dist/*
 
   # 打包Linux
   build-linux:
@@ -201,7 +372,9 @@ jobs:
           name: "${{ steps.version.outputs.VERSION }}"
           generate_release_notes: true
           prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
-          token: ${{ secrets.TOKEN }}
+          # 用 Actions 自带的 token 就够，四个 job 都已经声明了 contents: write。
+          # 之前这里读 secrets.TOKEN，等于强制要求手建一个 PAT，是多余的。
+          token: ${{ secrets.GITHUB_TOKEN }}
           files: |
             simple_live_app/build/dist/*/*.deb
             simple_live_app/build/dist/*/*.zip
@@ -263,7 +436,9 @@ jobs:
           name: "${{ steps.version.outputs.VERSION }}"
           generate_release_notes: true
           prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
-          token: ${{ secrets.TOKEN }}
+          # 用 Actions 自带的 token 就够，四个 job 都已经声明了 contents: write。
+          # 之前这里读 secrets.TOKEN，等于强制要求手建一个 PAT，是多余的。
+          token: ${{ secrets.GITHUB_TOKEN }}
           files: |
             simple_live_app/build/dist/*/*.msix
             simple_live_app/build/dist/*/*.zip

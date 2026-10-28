@@ -11,6 +11,10 @@ import 'package:simple_live_app/app/controller/base_controller.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:path/path.dart' as p;
 import 'package:simple_live_app/app/utils.dart';
+import 'package:simple_live_app/modules/iptv/iptv_service.dart';
+import 'package:simple_live_app/modules/iptv/iptv_tab_refresher.dart';
+import 'package:simple_live_app/modules/iptv/models/iptv_channel.dart';
+import 'package:simple_live_app/modules/iptv/models/iptv_source.dart';
 import 'package:simple_live_app/services/local_storage_service.dart';
 
 class OtherSettingsController extends BaseController {
@@ -159,10 +163,17 @@ class OtherSettingsController extends BaseController {
       var data = {
         "type": "simple_live",
         "platform": Platform.operatingSystem,
-        "version": 1,
+        "version": 2,
         "time": DateTime.now().millisecondsSinceEpoch,
         "config": LocalStorageService.instance.settingsBox.toMap(),
         "shield": LocalStorageService.instance.shieldBox.toMap(),
+        // 自定义直播源：源本身 + 频道列表（含播放列表里的顺序）
+        "iptvSources":
+            IptvService.instance.getSources().map((e) => e.toJson()).toList(),
+        "iptvChannels": IptvService.instance
+            .getAllChannels()
+            .map((e) => e.toJson())
+            .toList(),
       };
 
       var bytes = Uint8List.fromList(utf8.encode(jsonEncode(data)));
@@ -219,6 +230,27 @@ class OtherSettingsController extends BaseController {
       LocalStorageService.instance.settingsBox.putAll(data["config"]);
       LocalStorageService.instance.shieldBox
           .putAll(data["shield"].cast<String, String>());
+      // 自定义直播源：老版本的配置文件没有这两项，有才导入
+      var iptvSources = data["iptvSources"] as List?;
+      var iptvChannels = data["iptvChannels"] as List?;
+      if (iptvSources != null) {
+        await IptvService.instance.sourceBox.clear();
+        for (var item in iptvSources) {
+          var source = IptvSource.fromJson(item as Map<String, dynamic>);
+          await IptvService.instance.sourceBox.put(source.id, source);
+        }
+      }
+      if (iptvChannels != null) {
+        await IptvService.instance.channelBox.clear();
+        for (var item in iptvChannels) {
+          var channel = IptvChannel.fromJson(item as Map<String, dynamic>);
+          await IptvService.instance.channelBox.put(channel.id, channel);
+        }
+      }
+      if (iptvSources != null || iptvChannels != null) {
+        IptvService.instance.clearEpgCache();
+        IptvTabRefresher.refreshAll();
+      }
       SmartDialog.showToast("导入成功,重启生效");
     } catch (e) {
       Log.logPrint(e);

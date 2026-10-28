@@ -6,6 +6,7 @@ import 'package:simple_live_app/app/controller/base_controller.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/models/sync_client_info_model.dart';
+import 'package:simple_live_app/modules/iptv/iptv_service.dart';
 import 'package:simple_live_app/requests/sync_client_request.dart';
 import 'package:simple_live_app/services/bilibili_account_service.dart';
 import 'package:simple_live_app/services/db_service.dart';
@@ -71,6 +72,28 @@ class SyncDeviceController extends BaseController {
       var data = json.encode(shieldList.toList());
       await request.syncBlockedWord(client, data, overlay: overlay);
       SmartDialog.showToast("已同步屏蔽词");
+    } catch (e) {
+      SmartDialog.showToast("同步失败:$e");
+      Log.logPrint(e);
+    } finally {
+      SmartDialog.dismiss();
+    }
+  }
+
+  void syncIptv() async {
+    try {
+      var overlay = await showOverlayDialog();
+      SmartDialog.showLoading(msg: "同步中...");
+      var data = json.encode({
+        'sources':
+            IptvService.instance.getSources().map((e) => e.toJson()).toList(),
+        'channels': IptvService.instance
+            .getAllChannels()
+            .map((e) => e.toJson())
+            .toList(),
+      });
+      await request.syncIptv(client, data, overlay: overlay);
+      SmartDialog.showToast("已同步自定义直播源");
     } catch (e) {
       SmartDialog.showToast("同步失败:$e");
       Log.logPrint(e);

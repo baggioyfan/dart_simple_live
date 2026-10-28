@@ -78,6 +78,9 @@ class RoutePath {
   /// 远程同步-WebDAVConfig
   static const kRemoteSyncWebDavConfig = "/remote_sync/webDAVConfig";
 
+  /// IPTV 自定义直播源管理
+  static const kIptvSources = "/iptv/sources";
+
   /// 测试页面
   static const kTest = "/test";
 }

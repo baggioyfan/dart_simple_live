@@ -94,6 +94,27 @@ class SyncClientRequest {
     }
   }
 
+  Future<bool> syncIptv(
+    SyncClinet client,
+    dynamic body, {
+    bool overlay = false,
+  }) async {
+    var url = "http://${client.address}:${client.port}/sync/iptv";
+    var data = await HttpClient.instance.postJson(
+      url,
+      data: body,
+      queryParameters: {
+        'overlay': overlay ? '1' : '0',
+      },
+    );
+
+    if (data["status"]) {
+      return true;
+    } else {
+      throw data["message"];
+    }
+  }
+
   Future<bool> syncBiliAccount(SyncClinet client, String cookie) async {
     var url = "http://${client.address}:${client.port}/sync/account/bilibili";
     var data = await HttpClient.instance.postJson(
