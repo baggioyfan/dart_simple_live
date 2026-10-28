@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:simple_live_app/app/constant.dart';
 import 'package:simple_live_app/modules/iptv/iptv_service.dart';
 import 'package:simple_live_app/modules/iptv/models/iptv_channel.dart';
+import 'package:simple_live_app/modules/iptv/parsers/xmltv_parser.dart';
 import 'package:simple_live_core/simple_live_core.dart';
 
 /// IPTV 自定义直播源站点适配
@@ -55,11 +58,18 @@ class IptvSite extends LiveSite {
     if (parsed == null) {
       return LiveCategoryResult(hasMore: false, items: <LiveRoomItem>[]);
     }
-    final channels =
-        _service.getChannelsByGroup(parsed.$1, parsed.$2);
+    final channels = _service.getChannelsByGroup(parsed.$1, parsed.$2);
+
+    // 节目单在后台预热，不阻塞列表；已经有缓存就直接拿来当副标题
+    unawaited(_service.loadEpg(parsed.$1));
+    final guide = _service.cachedEpg(parsed.$1);
+    final now = DateTime.now();
+
     return LiveCategoryResult(
       hasMore: false,
-      items: channels.map(_toRoomItem).toList(),
+      items: channels
+          .map((e) => _toRoomItem(e, guide?.currentAt(e.tvgId, now)))
+          .toList(),
     );
   }
 
@@ -142,12 +152,13 @@ class IptvSite extends LiveSite {
     return LiveSearchRoomResult(hasMore: false, items: items);
   }
 
-  LiveRoomItem _toRoomItem(IptvChannel channel) {
+  LiveRoomItem _toRoomItem(IptvChannel channel, [EpgProgramme? current]) {
     return LiveRoomItem(
       roomId: channel.id,
       title: channel.name,
       cover: channel.logo,
-      userName: channel.groupTitle,
+      // 有节目单时副标题显示正在播的节目，否则退回分组名
+      userName: current?.title ?? channel.groupTitle,
       online: 0,
     );
   }

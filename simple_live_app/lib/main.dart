@@ -20,6 +20,7 @@ import 'package:simple_live_app/app/utils/listen_fourth_button.dart';
 import 'package:simple_live_app/models/db/follow_user.dart';
 import 'package:simple_live_app/models/db/follow_user_tag.dart';
 import 'package:simple_live_app/models/db/history.dart';
+import 'package:simple_live_app/modules/iptv/iptv_auto_refresh_service.dart';
 import 'package:simple_live_app/modules/iptv/iptv_service.dart';
 import 'package:simple_live_app/modules/iptv/models/iptv_channel.dart';
 import 'package:simple_live_app/modules/iptv/models/iptv_source.dart';
@@ -134,6 +135,8 @@ Future initServices() async {
   await Get.put(DBService()).init();
   //IPTV 自定义源
   await Get.put(IptvService()).init();
+  //IPTV 播放列表定期更新（赛事频道按日期滚动）
+  await Get.put(IptvAutoRefreshService()).init();
   //初始化设置控制器
   Get.put(AppSettingsController());
 

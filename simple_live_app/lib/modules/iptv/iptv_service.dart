@@ -4,6 +4,7 @@ import 'package:hive/hive.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/modules/iptv/models/iptv_channel.dart';
 import 'package:simple_live_app/modules/iptv/models/iptv_source.dart';
+import 'package:simple_live_app/modules/iptv/parsers/iptv_catchup.dart';
 import 'package:simple_live_app/modules/iptv/parsers/m3u_parser.dart';
 import 'package:simple_live_app/modules/iptv/parsers/xmltv_parser.dart';
 import 'package:uuid/uuid.dart';
@@ -174,7 +175,32 @@ class IptvService extends GetxService {
     }
   }
 
+  /// 只刷新超过 [maxAge] 的源，返回实际刷新的数量
+  ///
+  /// 赛事类频道（体育-今天/昨天/明天）会按日期滚动，播放列表内容每天都变，
+  /// 所以需要定期重拉，不能只在导入时取一次。
+  Future<int> refreshIfStale({required Duration maxAge}) async {
+    var count = 0;
+    final now = DateTime.now();
+    for (final source in getEnabledSources()) {
+      final last = source.lastUpdate;
+      if (last != null && now.difference(last) < maxAge) continue;
+      try {
+        await refreshSource(source.id);
+        count++;
+      } catch (e) {
+        Log.logPrint(e);
+      }
+    }
+    return count;
+  }
+
   // ---------------- EPG ----------------
+
+  /// 只读缓存，不触发网络请求
+  ///
+  /// 频道列表这类不该被网络拖慢的地方用它，拿不到就当没有节目单。
+  XmltvGuide? cachedEpg(String sourceId) => _epgCache[sourceId];
 
   /// 读取节目单，内存缓存 [IptvService._epgTtl]
   Future<XmltvGuide?> loadEpg(String sourceId, {bool force = false}) async {
@@ -201,6 +227,34 @@ class IptvService extends GetxService {
       // 拉取失败时退回旧缓存，有总比没有好
       return cached;
     }
+  }
+
+  // ---------------- 回看 ----------------
+
+  /// 回看模板：频道级优先，退回源级（m3u 头部那条）
+  String catchupTemplateOf(IptvChannel channel) {
+    if (channel.catchupSource.trim().isNotEmpty) return channel.catchupSource;
+    return getSource(channel.sourceId)?.catchupSource ?? '';
+  }
+
+  String catchupModeOf(IptvChannel channel) {
+    if (channel.catchupMode.trim().isNotEmpty) return channel.catchupMode;
+    return getSource(channel.sourceId)?.catchupMode ?? '';
+  }
+
+  /// 该频道是否支持回看
+  bool supportsCatchup(IptvChannel channel) =>
+      IptvCatchup.isSupported(catchupModeOf(channel), catchupTemplateOf(channel));
+
+  /// 把某档节目拼成回看地址，不支持时返回 null
+  String? buildCatchupUrl(IptvChannel channel, EpgProgramme programme) {
+    if (!supportsCatchup(channel)) return null;
+    return IptvCatchup.buildUrl(
+      streamUrl: channel.streamUrl,
+      template: catchupTemplateOf(channel),
+      start: programme.start,
+      stop: programme.stop,
+    );
   }
 
   // ---------------- 内部 ----------------

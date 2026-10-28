@@ -25,11 +25,18 @@ class IptvSourcePage extends GetView<IptvSourceController> {
       ),
       body: Obx(() {
         if (controller.sources.isEmpty) {
-          return _emptyView(context);
+          return ListView(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            children: [
+              _autoRefreshSection(context),
+              const SizedBox(height: 32),
+              _emptyView(context),
+            ],
+          );
         }
         return ListView.separated(
           padding: const EdgeInsets.symmetric(vertical: 8),
-          itemCount: controller.sources.length,
+          itemCount: controller.sources.length + 1,
           separatorBuilder: (_, __) => Divider(
             indent: 16,
             endIndent: 16,
@@ -37,12 +44,83 @@ class IptvSourcePage extends GetView<IptvSourceController> {
             color: Colors.grey.withAlpha(25),
           ),
           itemBuilder: (context, index) {
-            final source = controller.sources[index];
+            if (index == 0) {
+              return _autoRefreshSection(context);
+            }
+            final source = controller.sources[index - 1];
             return _sourceItem(context, source);
           },
         );
       }),
     );
+  }
+
+  /// 定期更新设置
+  ///
+  /// 体育类频道的「今天/昨天/明天」分组会按日期滚动，
+  /// 播放列表内容每天都变，所以必须定期重拉，不能只在导入时取一次。
+  Widget _autoRefreshSection(BuildContext context) {
+    return Obx(() {
+      final enabled = controller.autoRefreshEnabled.value;
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SwitchListTile(
+            value: enabled,
+            dense: true,
+            secondary: const Icon(Remix.refresh_line),
+            title: const Text("定期更新播放列表", style: TextStyle(fontSize: 15)),
+            subtitle: const Text(
+              "赛事频道会按日期滚动，开启后按间隔自动重拉",
+              style: TextStyle(fontSize: 11),
+            ),
+            onChanged: controller.setAutoRefreshEnabled,
+          ),
+          if (enabled)
+            ListTile(
+              dense: true,
+              leading: const Icon(Remix.time_line),
+              title: const Text("更新间隔", style: TextStyle(fontSize: 15)),
+              trailing: DropdownButton<int>(
+                value: IptvSourceController.intervalOptions
+                        .contains(controller.autoRefreshHours.value)
+                    ? controller.autoRefreshHours.value
+                    : IptvSourceController.intervalOptions.last,
+                underline: const SizedBox(),
+                items: [
+                  for (final hour in IptvSourceController.intervalOptions)
+                    DropdownMenuItem(
+                      value: hour,
+                      child: Text(
+                        "$hour 小时",
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                    ),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    controller.setAutoRefreshInterval(value);
+                  }
+                },
+              ),
+            ),
+          if (controller.sources.isNotEmpty)
+            ListTile(
+              dense: true,
+              leading: const Icon(Remix.play_list_line),
+              title: const Text("立即更新全部", style: TextStyle(fontSize: 15)),
+              subtitle: const Text(
+                "手动把所有源重拉一遍",
+                style: TextStyle(fontSize: 11),
+              ),
+              trailing: const Icon(Icons.chevron_right, size: 20),
+              onTap: controller.busy.value
+                  ? null
+                  : () => controller.refreshAllNow(),
+            ),
+        ],
+      );
+    });
   }
 
   Widget _emptyView(BuildContext context) {
