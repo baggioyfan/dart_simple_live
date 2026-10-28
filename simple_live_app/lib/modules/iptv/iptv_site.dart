@@ -10,11 +10,11 @@ import 'package:simple_live_core/simple_live_core.dart';
 /// - 二级分类 = 该源内的 group-title 分组
 /// - 房间 = 频道，播放地址直接交给播放器（media_kit/libmpv 能吃 m3u8）
 class IptvSite extends LiveSite {
-  @override
-  String id = Constant.kIptv;
-
-  @override
-  String name = "自定义源";
+  IptvSite() {
+    // 直接赋值而不是用字段覆盖，避免 overridden_fields 提示
+    id = Constant.kIptv;
+    name = "自定义源";
+  }
 
   IptvService get _service => IptvService.instance;
 
