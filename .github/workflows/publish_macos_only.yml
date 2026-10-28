@@ -1,0 +1,72 @@
+name: macos-build
+
+# 只构建 macOS，手动触发。
+# 不依赖 dev 分支，不需要 Android/TV 签名 secrets；TOKEN 仅在填写 tag_name 发 Release 时需要。
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "可选：填了就发 Release（如 v8.0.0）；留空只上传 Artifact"
+        required: false
+        default: ""
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.38.3"
+          cache: true
+
+      - name: Enable Flutter Desktop
+        run: flutter config --enable-macos-desktop
+
+      - name: Restore packages
+        run: |
+          cd simple_live_app
+          flutter pub get
+
+      - name: Install appdmg
+        run: npm install -g appdmg
+
+      - name: Install flutter_distributor
+        run: dart pub global activate flutter_distributor
+
+      - name: Build macOS (dmg + zip)
+        run: |
+          cd simple_live_app
+          flutter_distributor package --platform macos --targets dmg,zip
+
+      - name: List build output
+        if: always()
+        run: find simple_live_app/build/dist -type f 2>/dev/null || echo "no dist output"
+
+      - name: Upload macOS to Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          if-no-files-found: warn
+          path: |
+            simple_live_app/build/dist/*/*.dmg
+            simple_live_app/build/dist/*/*.zip
+
+      - name: Upload Release
+        if: inputs.tag_name != ''
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ inputs.tag_name }}
+          name: ${{ inputs.tag_name }}
+          generate_release_notes: true
+          token: ${{ secrets.TOKEN }}
+          files: |
+            simple_live_app/build/dist/*/*.dmg
+            simple_live_app/build/dist/*/*.zip
