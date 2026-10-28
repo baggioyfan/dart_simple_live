@@ -164,6 +164,21 @@ class MinePage extends StatelessWidget {
                   },
                 ),
                 ListTile(
+                  leading: const Icon(Remix.play_list_line),
+                  title: const Text("直播源设置"),
+                  subtitle: const Text(
+                    "导入 m3u 自定义源",
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  trailing: const Icon(
+                    Icons.chevron_right,
+                    color: Colors.grey,
+                  ),
+                  onTap: () {
+                    Get.toNamed(RoutePath.kIptvSources);
+                  },
+                ),
+                ListTile(
                   leading: const Icon(Remix.text),
                   title: const Text("弹幕设置"),
                   trailing: const Icon(

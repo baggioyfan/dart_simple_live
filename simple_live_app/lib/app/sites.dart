@@ -1,5 +1,6 @@
 import 'package:simple_live_app/app/constant.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
+import 'package:simple_live_app/modules/iptv/iptv_site.dart';
 import 'package:simple_live_core/simple_live_core.dart';
 
 class Sites {
@@ -27,6 +28,13 @@ class Sites {
       logo: "assets/images/douyin.png",
       name: "抖音直播",
       liveSite: DouyinSite(),
+    ),
+    // IPTV 自定义源，频道数据来自用户导入的 m3u
+    Constant.kIptv: Site(
+      id: Constant.kIptv,
+      logo: "assets/images/logo.png",
+      name: "自定义源",
+      liveSite: IptvSite(),
     ),
   };
 

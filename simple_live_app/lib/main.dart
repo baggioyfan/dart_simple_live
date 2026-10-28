@@ -20,6 +20,9 @@ import 'package:simple_live_app/app/utils/listen_fourth_button.dart';
 import 'package:simple_live_app/models/db/follow_user.dart';
 import 'package:simple_live_app/models/db/follow_user_tag.dart';
 import 'package:simple_live_app/models/db/history.dart';
+import 'package:simple_live_app/modules/iptv/iptv_service.dart';
+import 'package:simple_live_app/modules/iptv/models/iptv_channel.dart';
+import 'package:simple_live_app/modules/iptv/models/iptv_source.dart';
 import 'package:simple_live_app/modules/other/debug_log_page.dart';
 import 'package:simple_live_app/routes/app_pages.dart';
 import 'package:simple_live_app/routes/route_path.dart';
@@ -120,6 +123,8 @@ Future initServices() async {
   Hive.registerAdapter(FollowUserAdapter());
   Hive.registerAdapter(HistoryAdapter());
   Hive.registerAdapter(FollowUserTagAdapter());
+  Hive.registerAdapter(IptvSourceAdapter());
+  Hive.registerAdapter(IptvChannelAdapter());
 
   //包信息
   Utils.packageInfo = await PackageInfo.fromPlatform();
@@ -127,6 +132,8 @@ Future initServices() async {
   Log.d("Init LocalStorage Service");
   await Get.put(LocalStorageService()).init();
   await Get.put(DBService()).init();
+  //IPTV 自定义源
+  await Get.put(IptvService()).init();
   //初始化设置控制器
   Get.put(AppSettingsController());
 
