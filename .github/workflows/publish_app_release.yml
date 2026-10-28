@@ -122,7 +122,9 @@ jobs:
           name: "${{ steps.version.outputs.VERSION }}"
           generate_release_notes: true
           prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
-          token: ${{ secrets.TOKEN }}
+          # 用 Actions 自带的 token 就够，四个 job 都已经声明了 contents: write。
+          # 之前这里读 secrets.TOKEN，等于强制要求手建一个 PAT，是多余的。
+          token: ${{ secrets.GITHUB_TOKEN }}
           files: |
             simple_live_app/build/app/outputs/flutter-apk/app-x86_64-release.apk
             simple_live_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
@@ -305,7 +307,9 @@ jobs:
           name: "${{ steps.version.outputs.VERSION }}"
           generate_release_notes: true
           prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
-          token: ${{ secrets.TOKEN }}
+          # 用 Actions 自带的 token 就够，四个 job 都已经声明了 contents: write。
+          # 之前这里读 secrets.TOKEN，等于强制要求手建一个 PAT，是多余的。
+          token: ${{ secrets.GITHUB_TOKEN }}
           files: dist/*
 
   # 打包Linux
@@ -368,7 +372,9 @@ jobs:
           name: "${{ steps.version.outputs.VERSION }}"
           generate_release_notes: true
           prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
-          token: ${{ secrets.TOKEN }}
+          # 用 Actions 自带的 token 就够，四个 job 都已经声明了 contents: write。
+          # 之前这里读 secrets.TOKEN，等于强制要求手建一个 PAT，是多余的。
+          token: ${{ secrets.GITHUB_TOKEN }}
           files: |
             simple_live_app/build/dist/*/*.deb
             simple_live_app/build/dist/*/*.zip
@@ -430,7 +436,9 @@ jobs:
           name: "${{ steps.version.outputs.VERSION }}"
           generate_release_notes: true
           prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
-          token: ${{ secrets.TOKEN }}
+          # 用 Actions 自带的 token 就够，四个 job 都已经声明了 contents: write。
+          # 之前这里读 secrets.TOKEN，等于强制要求手建一个 PAT，是多余的。
+          token: ${{ secrets.GITHUB_TOKEN }}
           files: |
             simple_live_app/build/dist/*/*.msix
             simple_live_app/build/dist/*/*.zip
