@@ -198,6 +198,12 @@ class LocalStorageService extends GetxService {
   /// WebDAV_同步项：自定义直播源
   static const String kWebDAVSyncIptv = "kWebDAVSyncIptv";
 
+  /// WebDAV_有改动还没上传出去
+  ///
+  /// 改动只在内存里标记的话，用户改完直接把 App 划掉，这个标记就丢了，
+  /// 那次改动要等到下一次改动才会被带上去。落盘之后下次启动能补传。
+  static const String kWebDAVPendingUpload = "kWebDAVPendingUpload";
+
   /// 开启 IPTV 直播源自动更新
   static const String kIptvAutoRefreshEnable = "IptvAutoRefreshEnable";
 

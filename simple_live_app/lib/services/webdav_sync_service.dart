@@ -158,6 +158,7 @@ class WebDavSyncService extends GetxService with WidgetsBindingObserver {
     LocalStorageService.kWebDAVSyncBlockWord,
     LocalStorageService.kWebDAVSyncBiliAccount,
     LocalStorageService.kWebDAVSyncIptv,
+    LocalStorageService.kWebDAVPendingUpload,
   };
 
   // 云端备份里的文件名
@@ -182,7 +183,13 @@ class WebDavSyncService extends GetxService with WidgetsBindingObserver {
     _startPeriodic();
     // 云端检查放到首屏之后，别和启动时的网络请求抢
     Future.delayed(startupDelay, () {
-      if (autoDownload.value && configured) {
+      if (!configured) return;
+      // 上次退出前没传完的改动优先补传：这时候去下载会把本地改动冲掉
+      if (_dirty) {
+        if (autoUpload.value) _uploadNow();
+        return;
+      }
+      if (autoDownload.value) {
         checkRemote(silent: true);
       }
     });
@@ -266,6 +273,10 @@ class WebDavSyncService extends GetxService with WidgetsBindingObserver {
     lastRecoverTime.value = _formatStamp(
       _storage.getValue(LocalStorageService.kWebDAVLastRecoverTime, 0),
     );
+
+    // 上次退出前还有没传出去的改动
+    _dirty =
+        _storage.getValue(LocalStorageService.kWebDAVPendingUpload, false);
   }
 
   String _formatStamp(int milliseconds) {
@@ -315,6 +326,7 @@ class WebDavSyncService extends GetxService with WidgetsBindingObserver {
     await _storage.setValue(LocalStorageService.kWebDAVSyncedTime, 0);
     await _storage.setValue(LocalStorageService.kWebDAVLastUploadTime, 0);
     await _storage.setValue(LocalStorageService.kWebDAVLastRecoverTime, 0);
+    await _storage.setValue(LocalStorageService.kWebDAVPendingUpload, false);
 
     _client = null;
     _uri = '';
@@ -404,10 +416,26 @@ class WebDavSyncService extends GetxService with WidgetsBindingObserver {
     final until = _suppressUntil;
     if (until != null && DateTime.now().isBefore(until)) return;
     if (!configured) return;
-    _dirty = true;
+    _markDirty();
     if (!autoUpload.value) return;
     Log.d('WebDAV：$label 有改动，等待自动上传');
     _scheduleUpload();
+  }
+
+  /// 标记有未上传的改动，并落盘
+  ///
+  /// 只记在内存里的话，改完立刻把 App 划掉，标记就没了，这次改动要等到下次
+  /// 改动才被带上去。落盘之后下次启动能补传。
+  void _markDirty() {
+    if (_dirty) return;
+    _dirty = true;
+    _storage.setValue(LocalStorageService.kWebDAVPendingUpload, true);
+  }
+
+  void _clearDirty() {
+    if (!_dirty) return;
+    _dirty = false;
+    _storage.setValue(LocalStorageService.kWebDAVPendingUpload, false);
   }
 
   void _scheduleUpload() {
@@ -516,7 +544,7 @@ class WebDavSyncService extends GetxService with WidgetsBindingObserver {
       );
 
       lastUploadTime.value = Utils.parseTime(now);
-      _dirty = false;
+      _clearDirty();
       _lastUploadAt = now;
       _retryDelay = _retryBase;
       _retry?.cancel();
@@ -683,7 +711,7 @@ class WebDavSyncService extends GetxService with WidgetsBindingObserver {
       );
 
       lastRecoverTime.value = Utils.parseTime(now);
-      _dirty = false;
+      _clearDirty();
       status.value = '已下载（${Utils.parseTime(now)}）';
 
       // 数据被换了一批，正在看的页面要跟着刷新
