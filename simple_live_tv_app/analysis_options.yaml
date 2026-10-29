@@ -7,6 +7,17 @@
 
 # The following line activates a set of recommended lints for Flutter apps,
 # packages, and plugins designed to encourage good coding practices.
+analyzer:
+  # 平台目录里是原生工程和构建产物，不是 Dart 代码。
+  # 不排除的话 analyze 会去扫 build/ 下的生成文件，报一堆无关错误。
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
 include: package:flutter_lints/flutter.yaml
 
 linter:
