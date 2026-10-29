@@ -83,7 +83,7 @@ jobs:
           name: "${{ fromJson(steps.version.outputs.content).version }}"
           body: "# Android TV \n${{ fromJson(steps.version.outputs.content).version_desc }}"
           prerelease: ${{ fromJson(steps.version.outputs.content).prerelease }}
-          token: ${{ secrets.TOKEN }}
+          # 不传 token：action 默认用 github.token，本 job 已声明 contents: write。
           files: |
             simple_live_tv_app/build/app/outputs/flutter-apk/app-x86_64-release.apk
             simple_live_tv_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
