@@ -29,6 +29,16 @@ jobs:
           cd simple_live_app
           flutter pub get
 
+      # 临时步骤：把解析出来的 pubspec.lock 打到日志里
+      # 目的是在没有 Flutter 的机器上也能拿到这个文件（锁文件带内容哈希，手写不了）。
+      # 取到并提交之后这一整段要删掉。
+      - name: Dump pubspec.lock
+        run: |
+          cd simple_live_app
+          echo "===LOCK_BEGIN==="
+          base64 pubspec.lock
+          echo "===LOCK_END==="
+
       - name: Analyze
         run: |
           cd simple_live_app
