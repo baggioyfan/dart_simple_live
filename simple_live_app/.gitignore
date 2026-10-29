@@ -46,12 +46,7 @@ app.*.map.json
 /android/app/release
 
 /ios/Podfile.lock
-
-# pubspec.lock 要提交，不再忽略。
-# 这里是 application 不是 package，锁住依赖版本 CI 才可复现；不提交的话每次
-# flutter pub get 都重新解析一遍，上游任何一个包发个坏版本就会挂构建
-# （v1.12.1 的 auto_orientation_v2、v1.12.2 的 dynamic_color 都是这么挂的）。
-# 顺带和 simple_live_tv_app / simple_live_console 保持一致，那两个一直提交着。
+pubspec.lock
 
 .fvm/
 
