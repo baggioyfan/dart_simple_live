@@ -5,6 +5,7 @@ import 'package:simple_live_app/app/app_style.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/modules/sync/remote_sync/webdav/remote_sync_webdav_controller.dart';
 import 'package:simple_live_app/routes/route_path.dart';
+import 'package:simple_live_app/services/webdav_sync_service.dart';
 import 'package:simple_live_app/widgets/settings/settings_card.dart';
 
 class RemoteSyncWebDAVPage extends GetView<RemoteSyncWebDAVController> {
@@ -16,25 +17,15 @@ class RemoteSyncWebDAVPage extends GetView<RemoteSyncWebDAVController> {
       appBar: AppBar(
         title: const Text("WebDAV同步"),
       ),
-      body: ListView(
-        padding: AppStyle.edgeInsetsA12,
-        children: [
-          SettingsCard(
-            child: Obx(
-              () => Column(
-                children: controller.notLogin.value
+      body: Obx(() {
+        final logged = !controller.notLogin.value;
+        return ListView(
+          padding: AppStyle.edgeInsetsA12,
+          children: [
+            SettingsCard(
+              child: Column(
+                children: logged
                     ? [
-                        ListTile(
-                          title: const Text("点击登录"),
-                          leading: const Icon(Icons.login),
-                          subtitle: const Text("登录后可以同步您的所有数据"),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () {
-                            Get.toNamed(RoutePath.kRemoteSyncWebDavConfig);
-                          },
-                        ),
-                      ]
-                    : [
                         ListTile(
                           title: const Text("已登录"),
                           leading: const Icon(Icons.cloud_circle_outlined),
@@ -47,7 +38,7 @@ class RemoteSyncWebDAVPage extends GetView<RemoteSyncWebDAVController> {
                         AppStyle.divider,
                         ListTile(
                           title: const Text("上传到云端"),
-                          subtitle: Text("上次上传：${controller.lastUploadTime}"),
+                          subtitle: Text("上次上传：${controller.lastUploadTime.value}"),
                           leading: const Icon(Icons.cloud_upload_outlined),
                           trailing: const Icon(Icons.chevron_right),
                           onTap: () {
@@ -57,7 +48,8 @@ class RemoteSyncWebDAVPage extends GetView<RemoteSyncWebDAVController> {
                         AppStyle.divider,
                         ListTile(
                           title: const Text("恢复到本地"),
-                          subtitle: Text("上次恢复：${controller.lastRecoverTime}"),
+                          subtitle:
+                              Text("上次恢复：${controller.lastRecoverTime.value}"),
                           leading: const Icon(Icons.cloud_download_outlined),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -74,12 +66,123 @@ class RemoteSyncWebDAVPage extends GetView<RemoteSyncWebDAVController> {
                           },
                           onLongPress: showSetting,
                         ),
+                      ]
+                    : [
+                        ListTile(
+                          title: const Text("点击登录"),
+                          leading: const Icon(Icons.login),
+                          subtitle: const Text("登录后可以同步您的所有数据"),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () {
+                            Get.toNamed(RoutePath.kRemoteSyncWebDavConfig);
+                          },
+                        ),
                       ],
               ),
             ),
+            if (logged) ...[
+              AppStyle.vGap12,
+              SettingsCard(child: _autoSyncSection()),
+            ],
+          ],
+        );
+      }),
+    );
+  }
+
+  /// 自动同步设置
+  ///
+  /// 手动点上传/恢复的问题在于：改完设置或者点了关注，另一台设备不点一下就
+  /// 不会变。这里给两个开关，分别控制「改了就传」和「云端新了就拉」。
+  Widget _autoSyncSection() {
+    final service = WebDavSyncService.instance;
+    return Column(
+      children: [
+        SwitchListTile(
+          value: controller.autoUpload.value,
+          dense: true,
+          secondary: const Icon(Remix.upload_cloud_2_line),
+          title: const Text("自动上传", style: TextStyle(fontSize: 15)),
+          subtitle: const Text(
+            "关注、标签、历史、直播源、设置改动后自动上传",
+            style: TextStyle(fontSize: 11),
+          ),
+          onChanged: controller.changeAutoUpload,
+        ),
+        AppStyle.divider,
+        SwitchListTile(
+          value: controller.autoDownload.value,
+          dense: true,
+          secondary: const Icon(Remix.download_cloud_2_line),
+          title: const Text("自动下载", style: TextStyle(fontSize: 15)),
+          subtitle: const Text(
+            "启动、回到前台和定时检查，云端有新数据时自动恢复",
+            style: TextStyle(fontSize: 11),
+          ),
+          onChanged: controller.changeAutoDownload,
+        ),
+        if (controller.autoDownload.value) ...[
+          AppStyle.divider,
+          ListTile(
+            dense: true,
+            leading: const Icon(Remix.time_line),
+            title: const Text("检查间隔", style: TextStyle(fontSize: 15)),
+            trailing: DropdownButton<int>(
+              value: WebDavSyncService.checkIntervalOptions
+                      .contains(controller.checkInterval.value)
+                  ? controller.checkInterval.value
+                  : WebDavSyncService.defaultCheckInterval,
+              underline: const SizedBox(),
+              items: [
+                for (final minutes in WebDavSyncService.checkIntervalOptions)
+                  DropdownMenuItem(
+                    value: minutes,
+                    child: Text(
+                      minutes < 60 ? "$minutes 分钟" : "${minutes ~/ 60} 小时",
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                  ),
+              ],
+              onChanged: (value) {
+                if (value != null) {
+                  controller.changeCheckInterval(value);
+                }
+              },
+            ),
           ),
         ],
-      ),
+        AppStyle.divider,
+        ListTile(
+          dense: true,
+          leading: const Icon(Remix.refresh_line),
+          title: const Text("立即检查云端", style: TextStyle(fontSize: 15)),
+          subtitle: const Text(
+            "手动触发一次「云端有更新就拉下来」",
+            style: TextStyle(fontSize: 11),
+          ),
+          trailing: controller.syncing.value
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.chevron_right, size: 20),
+          onTap: controller.syncing.value
+              ? null
+              : () => controller.checkRemoteNow(),
+        ),
+        if (service.status.value.isNotEmpty) ...[
+          AppStyle.divider,
+          ListTile(
+            dense: true,
+            leading: const Icon(Remix.information_line, size: 20),
+            title: Text(
+              service.status.value,
+              style: const TextStyle(fontSize: 12),
+            ),
+          ),
+        ],
+      ],
     );
   }
 

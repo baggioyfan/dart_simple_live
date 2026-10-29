@@ -33,6 +33,7 @@ import 'package:simple_live_app/services/db_service.dart';
 import 'package:simple_live_app/services/follow_service.dart';
 import 'package:simple_live_app/services/local_storage_service.dart';
 import 'package:simple_live_app/services/sync_service.dart';
+import 'package:simple_live_app/services/webdav_sync_service.dart';
 import 'package:simple_live_app/widgets/status/app_loadding_widget.dart';
 import 'package:simple_live_core/simple_live_core.dart';
 import 'package:window_manager/window_manager.dart';
@@ -147,6 +148,10 @@ Future initServices() async {
   Get.put(SyncService());
 
   Get.put(FollowService());
+
+  //WebDAV 同步（自动上传/下载）
+  //放在最后：它要监听前面几个 service 的 box，并且需要 AppSettingsController
+  await Get.put(WebDavSyncService()).init();
 
   initCoreLog();
 }
