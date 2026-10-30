@@ -1,14 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-<dict>
-	<key>com.apple.security.app-sandbox</key>
-	<true/>
-	<key>com.apple.security.network.client</key>
-    <true/>
-	<key>com.apple.security.files.user-selected.read-write</key>
-  	<true/>
-	<key>com.apple.security.network.server</key>
-	<true/>
-</dict>
+<!--
+  Release 构建不再启用 App Sandbox。
+
+  原因：media_kit 打开播放列表时会把 m3u 写到 Directory.systemTemp，再让 mpv
+  loadlist。沙盒把 /tmp 挡在外面，写入又会被静默吞掉，mpv 于是报
+  "No such file or directory"，所有直播间都播不了（macOS 13 上必现）。
+
+  这个 App 以 zip 分发、不上 App Store，mpv 又是进程内的 dylib，沙盒既拦不住
+  它的网络访问也拦不住它解码，实际收益很低。去掉之后 /tmp 恢复可写，
+  TMPDIR 指向哪里都无所谓，不需要任何补丁。
+
+  注意：去掉沙盒后数据目录从
+  ~/Library/Containers/com.xycz.simpleLiveApp/Data/Library/Application Support/
+  变成 ~/Library/Application Support/com.xycz.simpleLiveApp/，旧数据需要搬一次。
+-->
+<dict/>
 </plist>
