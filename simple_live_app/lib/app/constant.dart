@@ -32,6 +32,7 @@ class Constant {
   static const String kDouyu = "douyu";
   static const String kHuya = "huya";
   static const String kDouyin = "douyin";
+  static const String kPandaLive = "pandalive";
   static const String kIptv = "iptv";
 }
 

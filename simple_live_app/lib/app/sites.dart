@@ -29,6 +29,12 @@ class Sites {
       name: "抖音直播",
       liveSite: DouyinSite(),
     ),
+    Constant.kPandaLive: Site(
+      id: Constant.kPandaLive,
+      logo: "assets/images/pandalive.png",
+      name: "PandaTV",
+      liveSite: PandaLiveSite(),
+    ),
     // IPTV 自定义源，频道数据来自用户导入的 m3u
     Constant.kIptv: Site(
       id: Constant.kIptv,
