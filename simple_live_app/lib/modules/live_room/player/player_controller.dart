@@ -55,6 +55,34 @@ mixin PlayerMixin {
         );
       }
     }
+    // HLS 分片复用同一条 HTTP 连接。
+    //
+    // ffmpeg 的 http 协议里 multiple_requests 默认是 -1（auto）：只有 range 请求才发
+    // Connection: keep-alive，普通 GET 一律 Connection: close。于是每个分片都要重新
+    // TCP + TLS 一次。实测（韩国节点 → CloudFront，2MB 分片）：单次握手 0.5~4.7s，
+    // 而数据本身传完只要 0.4s —— 握手比传输贵一个数量级，表现就是"连接反复重建"、
+    // 缓冲持续见底。
+    //
+    // 用 change-list add 而不是 setProperty：media_kit 在 _create() 里已经把
+    // demuxer-lavf-o 设成了
+    //   seg_max_retry=5,strict=experimental,allowed_extensions=ALL,protocol_whitelist=[...]
+    // 直接 set 会把这几项覆盖掉（protocol_whitelist 没了分片会被 ffmpeg 拒掉）。
+    // add 只按 key 合并，不碰已有的项。
+    if (player.platform is NativePlayer) {
+      try {
+        await pp.command(
+          ['change-list', 'demuxer-lavf-o', 'add', 'multiple_requests=1'],
+        );
+        // 回读确认：个别 mpv 构建对 key/value list 不支持 add，静默失败会让人
+        // 误以为已经生效，所以这里必须验一次。
+        final opts = await pp.getProperty('demuxer-lavf-o');
+        if (!opts.contains('multiple_requests')) {
+          Log.w("demuxer-lavf-o 未生效，分片可能仍在逐片重连：$opts");
+        }
+      } catch (e) {
+        Log.logPrint("设置 multiple_requests 失败：$e");
+      }
+    }
     // media_kit 仓库更新导致的问题，临时解决办法
     if(Platform.isAndroid){
       await pp.setProperty('force-seekable', 'yes');
