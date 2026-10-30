@@ -119,6 +119,9 @@ class AppSettingsController extends GetxController {
     customPlayerOutput.value = LocalStorageService.instance
         .getValue(LocalStorageService.kCustomPlayerOutput, false);
 
+    playerProxy.value = LocalStorageService.instance
+        .getValue(LocalStorageService.kPlayerProxy, "");
+
     videoOutputDriver.value = LocalStorageService.instance.getValue(
       LocalStorageService.kVideoOutputDriver,
       Platform.isAndroid ? "gpu" : "libmpv",
@@ -534,6 +537,14 @@ class AppSettingsController extends GetxController {
     customPlayerOutput.value = e;
     LocalStorageService.instance
         .setValue(LocalStorageService.kCustomPlayerOutput, e);
+  }
+
+  /// 播放器代理，形如 http://127.0.0.1:2080，空串表示直连
+  var playerProxy = "".obs;
+  void setPlayerProxy(String e) {
+    playerProxy.value = e.trim();
+    LocalStorageService.instance
+        .setValue(LocalStorageService.kPlayerProxy, e.trim());
   }
 
   var videoOutputDriver = "".obs;

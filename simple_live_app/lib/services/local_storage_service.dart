@@ -135,6 +135,9 @@ class LocalStorageService extends GetxService {
   /// 开启自定义播放器视频输出
   static const String kCustomPlayerOutput = "CustomPlayerOutput";
 
+  /// 播放器 HTTP 代理，交给 mpv 的 --http-proxy
+  static const String kPlayerProxy = "PlayerProxy";
+
   /// 视频输出驱动
   static const String kVideoOutputDriver = "VideoOutputDriver";
 

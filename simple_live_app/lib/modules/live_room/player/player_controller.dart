@@ -37,6 +37,15 @@ mixin PlayerMixin {
   /// 初始化播放器并设置 ao 参数
   Future<void> initializePlayer() async {
     var pp = player.platform as NativePlayer;
+    // 播放代理：mpv 不读系统代理设置（桌面端尤其），只能显式传 --http-proxy。
+    // 该选项对 HTTP 与 HTTPS 都生效，HLS 的 m3u8 和分片会一起走代理。
+    // 空串表示直连，也要设一次，否则会残留上一次的代理。
+    if (player.platform is NativePlayer) {
+      await (player.platform as dynamic).setProperty(
+        'http-proxy',
+        AppSettingsController.instance.playerProxy.value.trim(),
+      );
+    }
     // 设置音频输出驱动
     if (AppSettingsController.instance.customPlayerOutput.value) {
       if (player.platform is NativePlayer) {

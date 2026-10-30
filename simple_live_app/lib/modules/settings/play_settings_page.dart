@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:simple_live_app/app/app_style.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
+import 'package:simple_live_app/widgets/settings/settings_action.dart';
 import 'package:simple_live_app/widgets/settings/settings_card.dart';
 import 'package:simple_live_app/widgets/settings/settings_menu.dart';
 import 'package:simple_live_app/widgets/settings/settings_number.dart';
@@ -107,6 +108,18 @@ class PlaySettingsPage extends GetView<AppSettingsController> {
                     onChanged: (e) {
                       controller.setPlayerForceHttps(e);
                     },
+                  ),
+                ),
+                AppStyle.divider,
+                Obx(
+                  () => SettingsAction(
+                    title: "播放代理",
+                    subtitle: "形如 http://127.0.0.1:2080，留空则直连。"
+                        "mpv 不读系统代理，桌面端需在此填写；改动后需重新进入直播间",
+                    value: controller.playerProxy.value.isEmpty
+                        ? "直连"
+                        : controller.playerProxy.value,
+                    onTap: () => _showProxyDialog(context),
                   ),
                 ),
               ],
@@ -250,5 +263,41 @@ class PlaySettingsPage extends GetView<AppSettingsController> {
         ],
       ),
     );
+  }
+
+  /// 播放代理输入框。mpv 不读系统代理，只能显式设置 --http-proxy，
+  /// 所以这里让用户填一个地址，例如 http://127.0.0.1:2080。
+  Future<void> _showProxyDialog(BuildContext context) async {
+    var textController = TextEditingController(
+      text: controller.playerProxy.value,
+    );
+    var result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text("播放代理"),
+        content: TextField(
+          controller: textController,
+          autofocus: true,
+          keyboardType: TextInputType.url,
+          decoration: const InputDecoration(
+            hintText: "http://127.0.0.1:2080",
+            helperText: "留空表示直连",
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text("取消"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, textController.text),
+            child: const Text("确定"),
+          ),
+        ],
+      ),
+    );
+    if (result != null) {
+      controller.setPlayerProxy(result);
+    }
   }
 }
