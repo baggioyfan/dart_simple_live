@@ -73,20 +73,13 @@ class DouyinSite implements LiveSite {
       header: await getRequestHeaders(),
     );
 
-    var renderData =
-        RegExp(
-          r'\{\\"pathname\\":\\"\/\\",\\"categoryData.*?\]\\n',
-        ).firstMatch(result)?.group(0) ??
-        "";
-    var renderDataJson = json.decode(
-      renderData
-          .trim()
-          .replaceAll('\\"', '"')
-          .replaceAll(r"\\", r"\")
-          .replaceAll(']\\n', ""),
-    );
+    var categoryData = _extractCategoryData(result);
+    if (categoryData == null) {
+      CoreLog.d("[Douyin] 首页未找到 categoryData，分类为空");
+      return categories;
+    }
 
-    for (var item in renderDataJson["categoryData"]) {
+    for (var item in categoryData) {
       List<LiveSubCategory> subs = [];
       var id = '${item["partition"]["id_str"]},${item["partition"]["type"]}';
       for (var subItem in item["sub_partition"]) {
@@ -116,6 +109,48 @@ class DouyinSite implements LiveSite {
       categories.add(category);
     }
     return categories;
+  }
+
+  /// 从首页 SSR 数据里取出 categoryData 数组
+  ///
+  /// 页面是压缩过的，`categoryData` 后面紧跟着一整段没有换行的 JSON，
+  /// 用 `.*?\]\n` 这类靠换行定位的正则永远匹配不到（这也是之前分类一直
+  /// 为空的原因）。改成先定位 key，再按括号配平截取完整数组，最后把
+  /// `\"`、`\\` 还原成正常字符。
+  List? _extractCategoryData(String html) {
+    const key = '\\"categoryData\\":';
+    var start = html.indexOf(key);
+    if (start < 0) return null;
+
+    var begin = start + key.length;
+    var depth = 0;
+    var end = -1;
+    for (var i = begin; i < html.length; i++) {
+      var ch = html[i];
+      if (ch == "[") {
+        depth++;
+      } else if (ch == "]") {
+        depth--;
+        if (depth == 0) {
+          end = i + 1;
+          break;
+        }
+      }
+    }
+    if (end < 0) return null;
+
+    try {
+      var decoded = json.decode(
+        html
+            .substring(begin, end)
+            .replaceAll('\\"', '"')
+            .replaceAll(r"\\", "\\"),
+      );
+      return decoded is List ? decoded : null;
+    } catch (e) {
+      CoreLog.error(e);
+      return null;
+    }
   }
 
   @override
