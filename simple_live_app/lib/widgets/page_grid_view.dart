@@ -82,12 +82,13 @@ class PageGridView extends StatelessWidget {
           Positioned(
             bottom: 12,
             right: 12,
-            child: // 加载更多按钮
+            child: // 刷新按钮
                 Visibility(
+              // 不绑 canLoadMore：刷新和「还能不能加载更多」是两件事，
+              // 之前绑在一起导致翻到底后按钮直接消失。
               visible: (Platform.isWindows ||
                       Platform.isLinux ||
                       Platform.isMacOS) &&
-                  pageController.canLoadMore.value &&
                   !pageController.pageLoadding.value &&
                   !pageController.pageEmpty.value &&
                   showPCRefreshButton,

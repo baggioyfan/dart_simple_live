@@ -116,6 +116,19 @@ class HomeController extends GetxController {
     controller.scrollToTopOrRefresh();
   }
 
+  /// 直接刷新当前平台列表，供桌面端工具栏的刷新按钮调用
+  ///
+  /// 与 [refreshOrScrollTop] 的区别是不管滚动位置，一律重新加载第一页。
+  void refreshCurrentList() {
+    final sites = Sites.supportSites;
+    if (sites.isEmpty) return;
+    var tabIndex = tabController.index;
+    if (tabIndex < 0 || tabIndex >= sites.length) return;
+    var listController = Get.find<HomeListController>(tag: sites[tabIndex].id);
+    // callRefresh 会走 EasyRefresh 的 onRefresh，同时给出下拉动画作为反馈
+    listController.easyRefreshController.callRefresh();
+  }
+
   void toSearch() {
     Get.toNamed(RoutePath.kSearch);
   }

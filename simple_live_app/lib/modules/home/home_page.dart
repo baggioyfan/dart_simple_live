@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:simple_live_app/app/app_style.dart';
@@ -47,6 +49,14 @@ class HomePage extends GetView<HomeController> {
                 .toList(),
           ),
           actions: [
+            // 桌面端没有下拉刷新手势，给一个固定位置的刷新入口。
+            // 底部那个悬浮刷新按钮在 canLoadMore 为 false 时会消失，不可靠。
+            if (Platform.isMacOS || Platform.isWindows || Platform.isLinux)
+              IconButton(
+                onPressed: controller.refreshCurrentList,
+                tooltip: "刷新当前列表",
+                icon: const Icon(Icons.refresh),
+              ),
             IconButton(
               onPressed: controller.toSearch,
               icon: const Icon(Icons.search),
