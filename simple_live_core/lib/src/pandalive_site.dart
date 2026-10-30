@@ -23,7 +23,13 @@ import 'package:simple_live_core/src/model/live_search_result.dart';
 ///   未开播时 media 为 null，非存在用户返回 result=false。
 /// - 播放地址走 `POST /v1/live/play`，**必须带 action=watch**，否则接口只回
 ///   一个通用错误，看不出是参数问题。返回 PlayList.hls3/hls2/hls 三档，
-///   实际内容相同，均为 AWS IVS 的 HLS 地址。
+///   实际内容相同，均为 AWS IVS 的主 playlist 地址。
+///
+/// 播放链路有两个坑（2026-10 实测）：
+/// 1. 主 playlist 的 token 里 `aws:strict-origin-enforcement` 为 true，
+///    请求必须带 `Origin: https://www.pandalive.co.kr`，否则 403。
+/// 2. 主 playlist 的 token 是一次性的，第二次请求返回 duplicate token。
+///    所以这里先解析出子 playlist 再交给播放器，子 playlist 可以重复请求。
 class PandaLiveSite implements LiveSite {
   @override
   String id = "pandalive";
@@ -298,37 +304,96 @@ class PandaLiveSite implements LiveSite {
     return [];
   }
 
+  /// 请求 IVS 主 playlist，解析出各档子 playlist
+  ///
+  /// 主 playlist 的地址带一次性 token（JWT 里是 aws:single-use-uuid），
+  /// 第二次请求会返回 duplicate token / invalid_token；而它列出的子 playlist
+  /// 可以重复请求。所以把子 playlist 交给播放器，重连、拖动都不会再撞上
+  /// 一次性 token。
+  ///
+  /// 请求本身必须带 `Origin: https://www.pandalive.co.kr`——token 里
+  /// aws:strict-origin-enforcement 为 true，缺这个头或填别的来源都会 403。
+  Future<List<_PandaVariant>> _variants(
+    String masterUrl,
+    String referer,
+  ) async {
+    String text;
+    try {
+      text = await HttpClient.instance.getText(
+        masterUrl,
+        header: _headers(referer),
+      );
+    } on CoreError {
+      return [];
+    }
+
+    var byHeight = <int, _PandaVariant>{};
+    int? pendingHeight;
+    for (var raw in text.split("\n")) {
+      var line = raw.trim();
+      if (line.isEmpty) continue;
+      if (line.startsWith("#EXT-X-STREAM-INF:")) {
+        var match = RegExp(r"RESOLUTION=\d+x(\d+)").firstMatch(line);
+        pendingHeight = match == null ? null : int.tryParse(match.group(1)!);
+        continue;
+      }
+      if (line.startsWith("#")) continue;
+      var height = pendingHeight;
+      if (height == null) continue;
+      pendingHeight = null;
+      byHeight.putIfAbsent(
+        height,
+        () => _PandaVariant(_qualityName(height), height, line),
+      );
+    }
+
+    var result = byHeight.values.toList();
+    result.sort((a, b) => b.height.compareTo(a.height));
+    return result;
+  }
+
+  String _qualityName(int height) {
+    if (height >= 2160) return "4K";
+    if (height >= 1440) return "2K";
+    if (height >= 1080) return "1080P";
+    if (height >= 720) return "720P";
+    if (height >= 480) return "480P";
+    if (height >= 360) return "360P";
+    return "${height}P";
+  }
+
   @override
   Future<List<LivePlayQuality>> getPlayQualites({
     required LiveRoomDetail detail,
   }) async {
     var data = detail.data;
+    var userId = data is Map
+        ? (data["userId"] ?? detail.roomId).toString()
+        : detail.roomId;
+    var referer = _roomUrl(userId);
     var play = data is Map ? data["play"] : null;
     var streams = _streams(play is Map ? play : null);
 
-    if (streams.isEmpty) {
-      // 没有播放信息时给一个占位清晰度，getPlayUrls 会再尝试一次
-      return [
-        LivePlayQuality(quality: "自动", data: {"sort": 1}, sort: 1),
-      ];
+    var masterUrl =
+        streams.isEmpty ? "" : (streams.first["url"] ?? "").toString();
+    if (masterUrl.isNotEmpty) {
+      var variants = await _variants(masterUrl, referer);
+      if (variants.isNotEmpty) {
+        return [
+          for (var item in variants)
+            LivePlayQuality(
+              quality: item.name,
+              data: {"url": item.url, "height": item.height},
+              sort: item.height,
+            ),
+        ];
+      }
     }
 
-    var qualities = <LivePlayQuality>[];
-    var seen = <int>{};
-    for (var item in streams) {
-      var sort = int.tryParse((item["sort"] ?? 1).toString()) ?? 1;
-      if (!seen.add(sort)) continue;
-      var name = (item["name"] ?? "").toString();
-      qualities.add(
-        LivePlayQuality(
-          quality: name.isEmpty ? "自动" : name,
-          data: {"sort": sort, "url": (item["url"] ?? "").toString()},
-          sort: sort,
-        ),
-      );
-    }
-    qualities.sort((a, b) => b.sort.compareTo(a.sort));
-    return qualities;
+    // 主 playlist 解析失败时退回单档，getPlayUrls 会重新取一次 play
+    return [
+      LivePlayQuality(quality: "自动", data: {"sort": 1}, sort: 1),
+    ];
   }
 
   @override
@@ -337,50 +402,55 @@ class PandaLiveSite implements LiveSite {
     required LivePlayQuality quality,
   }) async {
     var data = detail.data;
-    var userId = data is Map ? (data["userId"] ?? detail.roomId).toString() : detail.roomId;
+    var userId = data is Map
+        ? (data["userId"] ?? detail.roomId).toString()
+        : detail.roomId;
     var referer = _roomUrl(userId);
-
-    // 重新取一次，避免详情页停留过久后 token 过期
-    var play = await _post(
-      "/v1/live/play",
-      {
-        "action": "watch",
-        "userId": userId,
-        "password": "",
-        "shareLinkType": "",
-      },
-      referer,
-    );
+    // 必须带 origin，否则 IVS 直接 403
+    var headers = _headers(referer);
 
     var qualityData = quality.data;
-    var wantSort = 1;
-    if (qualityData is Map && qualityData["sort"] != null) {
-      wantSort = int.tryParse(qualityData["sort"].toString()) ?? 1;
-    }
+    var url = qualityData is Map ? (qualityData["url"] ?? "").toString() : "";
 
-    var streams = _streams(play);
-    String url = "";
-    for (var item in streams) {
-      var sort = int.tryParse((item["sort"] ?? 1).toString()) ?? 1;
-      if (sort == wantSort) {
-        url = (item["url"] ?? "").toString();
-        break;
+    if (url.isEmpty) {
+      // 占位清晰度：重新取一次 play，再解析主 playlist
+      var play = await _post(
+        "/v1/live/play",
+        {
+          "action": "watch",
+          "userId": userId,
+          "password": "",
+          "shareLinkType": "",
+        },
+        referer,
+      );
+      var streams = _streams(play);
+      var masterUrl =
+          streams.isEmpty ? "" : (streams.first["url"] ?? "").toString();
+      if (masterUrl.isEmpty) {
+        return LivePlayUrl(urls: [], headers: headers);
+      }
+
+      var variants = await _variants(masterUrl, referer);
+      if (variants.isEmpty) {
+        // 解析不出来只能退回主 playlist（一次性 token，重连会失败）
+        url = masterUrl;
+      } else {
+        var wantHeight = qualityData is Map
+            ? int.tryParse((qualityData["height"] ?? 0).toString()) ?? 0
+            : 0;
+        var picked = variants.first;
+        for (var item in variants) {
+          if (item.height == wantHeight) {
+            picked = item;
+            break;
+          }
+        }
+        url = picked.url;
       }
     }
-    if (url.isEmpty && streams.isNotEmpty) {
-      url = (streams.first["url"] ?? "").toString();
-    }
-    if (url.isEmpty && qualityData is Map) {
-      url = (qualityData["url"] ?? "").toString();
-    }
 
-    return LivePlayUrl(
-      urls: url.isEmpty ? [] : [url],
-      headers: {
-        "referer": referer,
-        "user-agent": _ua,
-      },
-    );
+    return LivePlayUrl(urls: [url], headers: headers);
   }
 
   @override
@@ -402,4 +472,13 @@ class PandaLiveSite implements LiveSite {
     // PandaTV 没有公开的醒目留言接口
     return [];
   }
+}
+
+/// IVS 主 playlist 里的一档清晰度
+class _PandaVariant {
+  final String name;
+  final int height;
+  final String url;
+
+  _PandaVariant(this.name, this.height, this.url);
 }
