@@ -106,23 +106,21 @@ class PageGridView extends StatelessWidget {
               ),
             ),
           ),
-          Offstage(
-            offstage: !pageController.pageEmpty.value,
-            child: AppEmptyWidget(
+          // 这三个原来用 Offstage 隐藏。Offstage 只是不画，子树照样活着：
+          // AppLoaddingWidget 里的 CupertinoActivityIndicator 会一直 repeat，
+          // 每个 mounted 的 PageGridView 都挂着一个看不见的 60fps 动画，
+          // 空闲时也在不停出帧。改成条件构建，不需要时连 widget 都不建。
+          if (pageController.pageEmpty.value)
+            AppEmptyWidget(
               onRefresh: () => pageController.refreshData(),
             ),
-          ),
-          Offstage(
-            offstage: !(showPageLoadding && pageController.pageLoadding.value),
-            child: const AppLoaddingWidget(),
-          ),
-          Offstage(
-            offstage: !pageController.pageError.value,
-            child: AppErrorWidget(
+          if (showPageLoadding && pageController.pageLoadding.value)
+            const AppLoaddingWidget(),
+          if (pageController.pageError.value)
+            AppErrorWidget(
               errorMsg: pageController.errorMsg.value,
               onRefresh: () => pageController.refreshData(),
             ),
-          ),
         ],
       ),
     );
