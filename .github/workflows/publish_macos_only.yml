@@ -91,6 +91,15 @@ jobs:
           # 原来写死 ref: master，导致在功能分支上手动触发也只会构建 master。
           ref: ${{ inputs.ref || github.ref_name }}
 
+      # 填了 tag_name 就按它覆盖 pubspec 的 version。
+      # 不接这一步的话，产物名和 App 里显示的版本还是仓库里的旧值
+      # （v1.12.5 那次手动补的 arm64 包就还叫 1.12.3+11203）。
+      - name: Sync version from tag
+        if: ${{ inputs.tag_name != '' }}
+        uses: ./.github/actions/sync-version
+        with:
+          tag: ${{ inputs.tag_name }}
+
       - name: Show runner info
         run: |
           echo "target arch: ${{ matrix.arch }}"
@@ -139,16 +148,13 @@ jobs:
             >> macos/Runner/Configs/Release.xcconfig
           cat macos/Runner/Configs/Release.xcconfig
 
-      - name: Install appdmg
-        run: npm install -g appdmg
-
       - name: Install flutter_distributor
         run: dart pub global activate flutter_distributor
 
-      - name: Build macOS (dmg + zip)
+      - name: Build macOS (zip)
         run: |
           cd simple_live_app
-          flutter_distributor package --platform macos --targets dmg,zip
+          flutter_distributor package --platform macos --targets zip
 
       - name: Verify architecture
         # 必须硬失败：宿主与目标同架构时这里最容易静默出成 universal，
@@ -225,7 +231,7 @@ jobs:
         run: |
           cd simple_live_app
           mkdir -p dist
-          for f in build/dist/*/*.dmg build/dist/*/*.zip; do
+          for f in build/dist/*/*.zip; do
             [ -f "$f" ] || continue
             base=$(basename "$f")
             stem="${base%.*}"

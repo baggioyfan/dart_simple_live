@@ -38,6 +38,14 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.ref }}
 
+      # 填了 tag_name 就按它覆盖 pubspec 的 version，
+      # 否则 APK 里显示的版本号还是仓库里的旧值。
+      - name: Sync version from tag
+        if: ${{ inputs.tag_name != '' }}
+        uses: ./.github/actions/sync-version
+        with:
+          tag: ${{ inputs.tag_name }}
+
       #APK签名设置
       - name: Download Android keystore
         id: android_keystore
