@@ -173,6 +173,14 @@ class LocalStorageService extends GetxService {
   /// IPTV 直播源自动更新间隔（小时）
   static const String kIptvAutoRefreshInterval = "IptvAutoRefreshInterval";
 
+  /// 被关闭的直播渠道（`Site.id`）列表，逗号分隔
+  ///
+  /// 存「关掉的」而不是「开着的」：空字符串表示所有渠道全开，
+  /// 以后新增渠道时老用户也能默认看到，不会被历史配置挡掉。
+  /// 关闭渠道只是不在主页 / 分类页 / 搜索页挂出对应 tab，
+  /// 登录态、关注列表、已导入的直播源数据都照旧保留，随时可以再打开。
+  static const String kHiddenSites = "HiddenSites";
+
   late Box settingsBox;
   late Box<String> shieldBox;
 

@@ -38,9 +38,15 @@ class Sites {
     ),
   };
 
+  /// 当前生效的站点列表（已剔除被开关关闭的渠道）
+  ///
+  /// 首页、分类页、搜索页都从这里取 tab，所以渠道开关只需在这一处过滤，
+  /// 三个页面会同步隐藏 / 恢复，不用各自判断一遍。
   static List<Site> get supportSites {
-    return AppSettingsController.instance.siteSort
+    final settings = AppSettingsController.instance;
+    return settings.siteSort
         .map((key) => allSites[key]!)
+        .where((site) => settings.isSiteVisible(site.id))
         .toList();
   }
 }

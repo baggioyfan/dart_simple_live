@@ -1,5 +1,7 @@
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
+import 'package:simple_live_app/app/constant.dart';
+import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/modules/iptv/iptv_auto_refresh_service.dart';
 import 'package:simple_live_app/modules/iptv/iptv_service.dart';
@@ -21,11 +23,19 @@ class IptvSourceController extends GetxController {
   /// 可选间隔（小时）
   static const List<int> intervalOptions = [1, 3, 6, 12, 24];
 
+  /// 「自定义源」这个渠道当前是否显示
+  ///
+  /// 和其他平台共用同一份开关配置（`AppSettingsController.hiddenSiteIds`），
+  /// 这里只是把状态镜像成可以绑定的形式。真正的隐藏动作由
+  /// `Sites.supportSites` 过滤 + 首页 / 分类页重建 tab 完成。
+  final RxBool tabVisible = true.obs;
+
   @override
   void onInit() {
     super.onInit();
     reload();
     reloadAutoRefresh();
+    reloadTabVisible();
   }
 
   void reload() {
@@ -38,6 +48,28 @@ class IptvSourceController extends GetxController {
   void reloadAutoRefresh() {
     autoRefreshEnabled.value = _autoRefresh.enabled;
     autoRefreshHours.value = _autoRefresh.intervalHours;
+  }
+
+  void reloadTabVisible() {
+    tabVisible.value =
+        AppSettingsController.instance.isSiteVisible(Constant.kIptv);
+  }
+
+  /// 切换「在首页与分类页显示」
+  ///
+  /// 写的是全局渠道开关，和「主页设置 → 平台显示与排序」里那一排开关是同一个值，
+  /// 两边永远同步。
+  void setTabVisible(bool value) {
+    final ok = AppSettingsController.instance
+        .setSiteVisible(Constant.kIptv, value);
+    if (!ok) {
+      SmartDialog.showToast("至少保留一个平台");
+      reloadTabVisible();
+      return;
+    }
+    tabVisible.value = value;
+    // 重新挂回来时 tab 是新建的，顺手把频道数据也刷一遍
+    if (value) _reloadLiveTabs();
   }
 
   /// 导入新源，成功返回 true

@@ -10,45 +10,51 @@ class CategoryPage extends GetView<CategoryController> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 8,
-        title: TabBar(
-          controller: controller.tabController,
-          padding: EdgeInsets.zero,
-          tabAlignment: TabAlignment.center,
-          tabs: Sites.supportSites
-              .map(
-                (e) => Tab(
-                  //text: e.name,
-                  child: Row(
-                    children: [
-                      Image.asset(
-                        e.logo,
-                        width: 24,
-                      ),
-                      AppStyle.hGap8,
-                      Text(e.name),
-                    ],
+    // 依赖 tabRevision：自定义源开关切换后 tab 数量会变，这里跟着整体重建
+    return Obx(() {
+      final revision = controller.tabRevision.value;
+      final sites = Sites.supportSites;
+      return Scaffold(
+        appBar: AppBar(
+          titleSpacing: 8,
+          title: TabBar(
+            key: ValueKey("categoryTabBar$revision"),
+            controller: controller.tabController,
+            padding: EdgeInsets.zero,
+            tabAlignment: TabAlignment.center,
+            tabs: sites
+                .map(
+                  (e) => Tab(
+                    child: Row(
+                      children: [
+                        Image.asset(
+                          e.logo,
+                          width: 24,
+                        ),
+                        AppStyle.hGap8,
+                        Text(e.name),
+                      ],
+                    ),
                   ),
+                )
+                .toList(),
+            labelPadding: AppStyle.edgeInsetsH20,
+            isScrollable: true,
+            indicatorSize: TabBarIndicatorSize.label,
+          ),
+        ),
+        body: TabBarView(
+          key: ValueKey("categoryTabView$revision"),
+          controller: controller.tabController,
+          children: sites
+              .map(
+                (e) => CategoryListView(
+                  e.id,
                 ),
               )
               .toList(),
-          labelPadding: AppStyle.edgeInsetsH20,
-          isScrollable: true,
-          indicatorSize: TabBarIndicatorSize.label,
         ),
-      ),
-      body: TabBarView(
-        controller: controller.tabController,
-        children: Sites.supportSites
-            .map(
-              (e) => CategoryListView(
-                e.id,
-              ),
-            )
-            .toList(),
-      ),
-    );
+      );
+    });
   }
 }

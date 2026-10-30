@@ -10,51 +10,56 @@ class HomePage extends GetView<HomeController> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 8,
-        title: TabBar(
-          controller: controller.tabController,
-          labelPadding: AppStyle.edgeInsetsH20,
-          isScrollable: true,
-          indicatorSize: TabBarIndicatorSize.label,
-          tabAlignment: TabAlignment.center,
-          tabs: Sites.supportSites
-              .map(
-                (e) => Tab(
-                  //text: e.name,
-
-                  child: Row(
-                    children: [
-                      Image.asset(
-                        e.logo,
-                        width: 24,
-                      ),
-                      AppStyle.hGap8,
-                      Text(e.name),
-                    ],
+    // 依赖 tabRevision：自定义源开关切换后 tab 数量会变，这里跟着整体重建
+    return Obx(() {
+      final revision = controller.tabRevision.value;
+      final sites = Sites.supportSites;
+      return Scaffold(
+        appBar: AppBar(
+          titleSpacing: 8,
+          title: TabBar(
+            key: ValueKey("homeTabBar$revision"),
+            controller: controller.tabController,
+            labelPadding: AppStyle.edgeInsetsH20,
+            isScrollable: true,
+            indicatorSize: TabBarIndicatorSize.label,
+            tabAlignment: TabAlignment.center,
+            tabs: sites
+                .map(
+                  (e) => Tab(
+                    child: Row(
+                      children: [
+                        Image.asset(
+                          e.logo,
+                          width: 24,
+                        ),
+                        AppStyle.hGap8,
+                        Text(e.name),
+                      ],
+                    ),
                   ),
+                )
+                .toList(),
+          ),
+          actions: [
+            IconButton(
+              onPressed: controller.toSearch,
+              icon: const Icon(Icons.search),
+            )
+          ],
+        ),
+        body: TabBarView(
+          key: ValueKey("homeTabView$revision"),
+          controller: controller.tabController,
+          children: sites
+              .map(
+                (e) => HomeListView(
+                  e.id,
                 ),
               )
               .toList(),
         ),
-        actions: [
-          IconButton(
-            onPressed: controller.toSearch,
-            icon: const Icon(Icons.search),
-          )
-        ],
-      ),
-      body: TabBarView(
-        controller: controller.tabController,
-        children: Sites.supportSites
-            .map(
-              (e) => HomeListView(
-                e.id,
-              ),
-            )
-            .toList(),
-      ),
-    );
+      );
+    });
   }
 }

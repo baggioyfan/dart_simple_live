@@ -28,6 +28,7 @@ class IptvSourcePage extends GetView<IptvSourceController> {
           return ListView(
             padding: const EdgeInsets.symmetric(vertical: 8),
             children: [
+              _tabVisibleSection(context),
               _autoRefreshSection(context),
               const SizedBox(height: 32),
               _emptyView(context),
@@ -45,13 +46,38 @@ class IptvSourcePage extends GetView<IptvSourceController> {
           ),
           itemBuilder: (context, index) {
             if (index == 0) {
-              return _autoRefreshSection(context);
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _tabVisibleSection(context),
+                  _autoRefreshSection(context),
+                ],
+              );
             }
             final source = controller.sources[index - 1];
             return _sourceItem(context, source);
           },
         );
       }),
+    );
+  }
+
+  /// 首页 / 分类页是否挂出「自定义源」tab
+  ///
+  /// 关掉之后只是不显示，源和已导入的频道都还在，随时可以再打开。
+  Widget _tabVisibleSection(BuildContext context) {
+    return Obx(
+      () => SwitchListTile(
+        value: controller.tabVisible.value,
+        dense: true,
+        secondary: const Icon(Remix.play_list_line),
+        title: const Text("在首页与分类页显示", style: TextStyle(fontSize: 15)),
+        subtitle: const Text(
+          "与其它平台共用同一个开关；关闭后主页和分类页都不再出现自定义源，源与频道数据仍会保留",
+          style: TextStyle(fontSize: 11),
+        ),
+        onChanged: controller.setTabVisible,
+      ),
     );
   }
 

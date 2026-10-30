@@ -153,6 +153,18 @@ class AppSettingsController extends GetxController {
     updateFollowThreadCount.value = LocalStorageService.instance
         .getValue(LocalStorageService.kUpdateFollowThreadCount, 0);  // 默认 0 = 自动
 
+    // 必须在 initSiteSort 之前读出来：home / category 构建 tab 时会用到它。
+    // 存的是「被关掉的渠道 id」，顺手把已经不存在的老 id 过滤掉，避免脏数据。
+    hiddenSiteIds.value = LocalStorageService.instance
+        .getValue(LocalStorageService.kHiddenSites, "")
+        .split(",")
+        .where((e) => e.isNotEmpty && Sites.allSites.containsKey(e))
+        .toList();
+    // 兜底：万一把所有渠道都关了（历史脏数据或渠道被裁撤），一个 tab 都不剩就没法用了
+    if (hiddenSiteIds.length >= Sites.allSites.length) {
+      hiddenSiteIds.value = <String>[];
+    }
+
     initSiteSort();
     initHomeSort();
 
@@ -411,6 +423,47 @@ class AppSettingsController extends GetxController {
       LocalStorageService.kSiteSort,
       siteSort.join(","),
     );
+  }
+
+  /// 被关闭的直播渠道 id 列表（默认空 = 全部渠道都显示）
+  ///
+  /// 这是渠道开关的唯一数据源。真正的过滤发生在 `Sites.supportSites`，
+  /// 首页、分类页、搜索页都从那里取 tab，所以一处配置三处同步生效。
+  final RxList<String> hiddenSiteIds = <String>[].obs;
+
+  /// 渠道开关版本号
+  ///
+  /// `TabController.length` 在构造时就固定了，渠道数量一变只能整体重建 tab。
+  /// 开关变化时自增这个值，首页 / 分类页监听它来重建，避免直接监听列表
+  /// 而漏掉「同一帧内连续开关两个渠道」这类情况。
+  final RxInt siteVisibilityRevision = 0.obs;
+
+  /// 某个渠道当前是否显示
+  bool isSiteVisible(String id) => !hiddenSiteIds.contains(id);
+
+  /// 当前显示中的渠道数量（按已注册的渠道算，不受排序表脏数据影响）
+  int get visibleSiteCount =>
+      Sites.allSites.keys.where(isSiteVisible).length;
+
+  /// 切换某个渠道的显示开关，返回是否生效
+  ///
+  /// 至少保留一个渠道：全部关掉的话首页会一个 tab 都没有，用户就没路可走了。
+  /// 被拒绝时返回 false，由调用方提示用户。
+  bool setSiteVisible(String id, bool visible) {
+    if (isSiteVisible(id) == visible) return true;
+    if (!visible && visibleSiteCount <= 1) return false;
+
+    final next = hiddenSiteIds.toList();
+    if (visible) {
+      next.remove(id);
+    } else if (!next.contains(id)) {
+      next.add(id);
+    }
+    hiddenSiteIds.value = next;
+    LocalStorageService.instance
+        .setValue(LocalStorageService.kHiddenSites, next.join(","));
+    siteVisibilityRevision.value++;
+    return true;
   }
 
   RxList<String> homeSort = RxList<String>();
