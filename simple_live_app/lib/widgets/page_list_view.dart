@@ -103,23 +103,19 @@ class PageListView extends StatelessWidget {
               ),
             ),
           ),
-          Offstage(
-            offstage: !pageController.pageEmpty.value,
-            child: AppEmptyWidget(
+          // 与 PageGridView 同理：Offstage 不关 ticker，隐藏的
+          // CupertinoActivityIndicator 会一直转，改成条件构建。
+          if (pageController.pageEmpty.value)
+            AppEmptyWidget(
               onRefresh: () => pageController.refreshData(),
             ),
-          ),
-          Offstage(
-            offstage: !(showPageLoadding && pageController.pageLoadding.value),
-            child: const AppLoaddingWidget(),
-          ),
-          Offstage(
-            offstage: !pageController.pageError.value,
-            child: AppErrorWidget(
+          if (showPageLoadding && pageController.pageLoadding.value)
+            const AppLoaddingWidget(),
+          if (pageController.pageError.value)
+            AppErrorWidget(
               errorMsg: pageController.errorMsg.value,
               onRefresh: () => pageController.refreshData(),
             ),
-          ),
         ],
       ),
     );
