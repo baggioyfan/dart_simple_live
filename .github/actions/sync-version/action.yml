@@ -1,0 +1,44 @@
+name: Sync version from tag
+description: 按 tag 覆盖 simple_live_app/pubspec.yaml 的 version 字段
+
+# 版本号规则：
+#   tag v1.12.4  →  pubspec 1.12.4+11204
+#   versionCode = major*10000 + minor*100 + patch
+# 之所以按 semver 算而不是用 run_number，是因为 Android 要求 versionCode
+# 单调递增：run_number 会从 1 开始重来，装过旧包的机器会拒绝升级。
+# 之前的 1.12.3+11203 就是按这个规则来的，所以能直接接上。
+
+inputs:
+  tag:
+    description: "版本 tag，如 v1.12.4"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Rewrite pubspec version
+      shell: bash
+      working-directory: simple_live_app
+      env:
+        # 走 env 而不是直接插值，避免 tag 里的特殊字符进 shell
+        RAW_TAG: ${{ inputs.tag }}
+      run: |
+        # 同时兼容 v1.12.4 和 dev_v1.12.4 两种 tag
+        VER="${RAW_TAG#dev_v}"
+        VER="${VER#v}"
+        # beta / rc 之类的后缀保留在 version 里，但不参与 versionCode 计算
+        CORE=$(printf '%s' "$VER" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+        if ! printf '%s' "$CORE" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+          echo "::error::tag「$RAW_TAG」不是 vX.Y.Z 形式，无法推导版本号"
+          exit 1
+        fi
+        MAJOR=${CORE%%.*}
+        REST=${CORE#*.}
+        MINOR=${REST%%.*}
+        PATCH=${REST#*.}
+        CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))
+        # -i.bak 在 BSD sed（macOS）和 GNU sed（Linux/Windows bash）上都可用
+        sed -i.bak -E "s/^version:.*/version: ${VER}+${CODE}/" pubspec.yaml
+        rm -f pubspec.yaml.bak
+        echo "pubspec version -> ${VER}+${CODE}"
+        grep "^version:" pubspec.yaml
