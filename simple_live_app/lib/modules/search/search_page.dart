@@ -64,7 +64,6 @@ class SearchPage extends GetView<AppSearchController> {
         bottom: TabBar(
           controller: controller.tabController,
           padding: EdgeInsets.zero,
-          tabAlignment: TabAlignment.center,
           tabs: Sites.supportSites
               .map(
                 (e) => Tab(

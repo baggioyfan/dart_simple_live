@@ -17,11 +17,13 @@ class CategoryPage extends GetView<CategoryController> {
       return Scaffold(
         appBar: AppBar(
           titleSpacing: 8,
+          // 同首页：不设 centerTitle 时 iOS / macOS 会把 TabBar 收窄成内容宽度，
+          // 站点一多就滑不动。
+          centerTitle: false,
           title: TabBar(
             key: ValueKey("categoryTabBar$revision"),
             controller: controller.tabController,
             padding: EdgeInsets.zero,
-            tabAlignment: TabAlignment.center,
             tabs: sites
                 .map(
                   (e) => Tab(

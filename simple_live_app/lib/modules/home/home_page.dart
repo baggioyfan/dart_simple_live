@@ -17,13 +17,18 @@ class HomePage extends GetView<HomeController> {
       return Scaffold(
         appBar: AppBar(
           titleSpacing: 8,
+          // iOS / macOS 下 centerTitle 默认为 true，会把 title 里的 TabBar
+          // 收窄成内容宽度，isScrollable 随之失效：站点多了只会溢出屏幕，
+          // 滑不动也点不到后面的站。
+          centerTitle: false,
           title: TabBar(
             key: ValueKey("homeTabBar$revision"),
             controller: controller.tabController,
             labelPadding: AppStyle.edgeInsetsH20,
             isScrollable: true,
             indicatorSize: TabBarIndicatorSize.label,
-            tabAlignment: TabAlignment.center,
+            // 不用 TabAlignment.center：可滚动时它按视口宽度居中锚定，
+            // 内容超宽后两端滚不到位。
             tabs: sites
                 .map(
                   (e) => Tab(
