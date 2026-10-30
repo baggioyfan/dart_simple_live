@@ -1,9 +1,15 @@
 name: app-build-action
-#推送Tag时触发
+# 推送 Tag 时触发；也可以在 Actions 页面手动 Run workflow。
+# 手动触发只产出 Artifacts，不会创建 Release（没有 tag 可挂，硬发会污染版本列表）。
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+
+# Actions 列表里区分自动发版和手动试构建
+run-name: ${{ github.event_name == 'workflow_dispatch' && '手动构建（仅 Artifacts）' || github.ref_name }}
+
 jobs:
   # macOS 要按架构拆成两个 job，而 matrix 是静态的、job 级 if 又拿不到 matrix
   # 上下文，所以先用一个极轻的 job 把「这次编哪些架构」算成 JSON。
@@ -71,20 +77,23 @@ jobs:
           flutter pub get
 
       #打包APK
+      #只出 arm64-v8a：armeabi-v7a 的机器跑直播基本带不动，x86_64 只对模拟器
+      #有意义，多编两个 ABI 纯属浪费 runner 时间。--split-per-abi 保留是为了
+      #产物文件名带架构后缀，用户下载时能一眼看出装哪个。
       - name: Build APK
         run: |
           cd simple_live_app
-          flutter build apk --release --split-per-abi
+          flutter build apk --release --target-platform android-arm64 --split-per-abi
 
       #上传APK至Artifacts
       - name: Upload APK to Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: mobile-android
+          # 产物名对不上就直接红，别静默产出一个空 artifact
+          if-no-files-found: error
           path: |
-            simple_live_app/build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
             simple_live_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-            simple_live_app/build/app/outputs/flutter-apk/app-x86_64-release.apk
 
   # iOS 构建暂时停用 —— 维护者没有 iOS 设备，产出的未签名 ipa 也没人装，
   # 却每次发版都要去抢一次 macOS runner（抢不到还会拖慢整条流水线）。
@@ -142,7 +151,8 @@ jobs:
   #   2. 用 !cancelled() 而不是默认的「needs 全成功」，某个平台挂了不影响别的。
   publish-mobile:
     needs: build-android
-    if: ${{ !cancelled() }}
+    # 手动触发没有 tag，release 无从挂载，直接跳过，产物留在 Artifacts 里
+    if: ${{ !cancelled() && github.event_name == 'push' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -243,16 +253,15 @@ jobs:
             >> macos/Runner/Configs/Release.xcconfig
           cat macos/Runner/Configs/Release.xcconfig
 
-      - name: Install appdmg
-        run: npm install -g appdmg
-
       - name: Install flutter_distributor
         run: dart pub global activate flutter_distributor
 
-      - name: Build macOS (dmg + zip)
+      - name: Build macOS (zip)
+        # 只出 zip：dmg 需要额外装 appdmg，且和 zip 内容完全一致，
+        # 维护者自己发版也只用 zip，省一步少一个依赖。
         run: |
           cd simple_live_app
-          flutter_distributor package --platform macos --targets dmg,zip
+          flutter_distributor package --platform macos --targets zip
 
       - name: Verify architecture
         # 必须硬失败：宿主与目标同架构时最容易静默出成 universal，那就等于白拆。
@@ -308,7 +317,7 @@ jobs:
         run: |
           cd simple_live_app
           mkdir -p dist
-          for f in build/dist/*/*.dmg build/dist/*/*.zip; do
+          for f in build/dist/*/*.zip; do
             [ -f "$f" ] || continue
             base=$(basename "$f")
             stem="${base%.*}"
@@ -331,7 +340,8 @@ jobs:
     needs: build-macos
     # 默认行为是「needs 全部成功才跑」，于是 arm64 抢不到 runner 被取消时，
     # 已经编好的 x86_64 也跟着发不出去。改成 !cancelled() 让两个架构各自算数。
-    if: ${{ !cancelled() }}
+    # 手动触发同样跳过：没有 tag，产物留在 Artifacts。
+    if: ${{ !cancelled() && github.event_name == 'push' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -363,73 +373,6 @@ jobs:
           # 不传 token：action 默认用 github.token，相关 job 都已声明 contents: write。
           files: dist/*
 
-  # 打包Linux
-  build-linux:
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: write
-    steps:
-      # 签出代码
-      - uses: actions/checkout@v4
-        with:
-          ref: master
-      # 设置Flutter环境
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: "3.38.x"
-          cache: true
-      # 安装依赖
-      - name: Update apt-get
-        run: sudo apt-get update
-      - name: Install Dependencies
-        run: sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libasound2-dev libmpv-dev mpv
-      # 打开Linux Desktop支持
-      - name: Enable Flutter Desktop
-        run: flutter config --enable-linux-desktop
-      # 更新Flutter的packages
-      - name: Restore Packages
-        run: |
-          cd simple_live_app
-          flutter pub get
-      # 设置flutter_distributor环境
-      - name: Install flutter_distributor
-        run: dart pub global activate flutter_distributor
-      # build Linux ZIP\DMG
-      - name: Build Linux
-        run: |
-          cd simple_live_app
-          flutter_distributor package --platform linux --targets deb,zip --skip-clean
-      # 上传Linux包至Artifacts
-      - name: Upload Linux APP to Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux
-          path: |
-            simple_live_app/build/dist/*/*.deb
-            simple_live_app/build/dist/*/*.zip
-
-      #获取版本信息（自动从 Git Tag 提取）
-      - name: Get version from tag
-        id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-      - name: Echo version
-        run: echo "${{ steps.version.outputs.VERSION }}"
-
-      #上传至Release
-      - name: Upload Release
-        uses: softprops/action-gh-release@v1
-        with:
-          name: "${{ steps.version.outputs.VERSION }}"
-          generate_release_notes: true
-          prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
-          # 不传 token：action 默认用 github.token，相关 job 都已声明 contents: write。
-          files: |
-            simple_live_app/build/dist/*/*.deb
-            simple_live_app/build/dist/*/*.zip
-        #完成
-      - run: echo "🍏 Linux job's status is ${{ job.status }}."
-
   # 打包Windows
   build-windows:
     runs-on: windows-latest
@@ -455,11 +398,12 @@ jobs:
       # 设置flutter_distributor环境
       - name: Install flutter_distributor
         run: dart pub global activate flutter_distributor
-      # build Windows ZIP\MSIX
+      # build Windows ZIP
+      # 只出 zip：msix 需要签名证书才能装，维护者发的也是免安装 zip
       - name: Build Windows
         run: |
           cd simple_live_app
-          flutter_distributor package --platform windows --targets msix,zip --skip-clean
+          flutter_distributor package --platform windows --targets zip --skip-clean
 
       # 上传Windows至Artifacts
       - name: Upload Windows APP to Artifacts
@@ -467,19 +411,21 @@ jobs:
         with:
           name: windows
           path: |
-            simple_live_app/build/dist/*/*.msix
             simple_live_app/build/dist/*/*.zip
 
       #获取版本信息（自动从 Git Tag 提取）
       - name: Get version from tag
         id: version
         shell: bash
+        if: ${{ github.event_name == 'push' }}
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
       - name: Echo version
+        if: ${{ github.event_name == 'push' }}
         run: echo "${{ steps.version.outputs.VERSION }}"
 
       #上传至Release
       - name: Upload Release
+        if: ${{ github.event_name == 'push' }}
         uses: softprops/action-gh-release@v1
         with:
           name: "${{ steps.version.outputs.VERSION }}"
@@ -487,7 +433,6 @@ jobs:
           prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
           # 不传 token：action 默认用 github.token，相关 job 都已声明 contents: write。
           files: |
-            simple_live_app/build/dist/*/*.msix
             simple_live_app/build/dist/*/*.zip
 
       #完成
