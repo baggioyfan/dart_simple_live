@@ -248,13 +248,17 @@ class PandaLiveSite implements LiveSite {
         online: 0,
         status: false,
         url: referer,
-        data: {"userId": userId, "play": null},
+        data: {"userId": userId, "play": null, "isAdult": false},
       );
     }
 
     var bjInfo = member["bjInfo"] is Map ? Map.from(member["bjInfo"]) : {};
     var media = member["media"] is Map ? Map.from(member["media"]) : null;
     var isLive = media != null && media["isLive"] == true;
+    // 19+ 房：封面会被平台换成 19 禁图，且 /v1/live/play 在成人验证通过前
+    // 只返回 result=false，拿不到任何播放地址。这里把标记透传给上层，
+    // 好让"需要成人验证"和"接口挂了"区分开。
+    var isAdult = media != null && media["isAdult"] == true;
 
     // 开播时才去取播放信息，PlayList 里带清晰度与地址
     Map? play;
@@ -287,7 +291,7 @@ class PandaLiveSite implements LiveSite {
       url: referer,
       isRecord: false,
       danmakuData: null,
-      data: {"userId": userId, "play": play},
+      data: {"userId": userId, "play": play, "isAdult": isAdult},
     );
   }
 

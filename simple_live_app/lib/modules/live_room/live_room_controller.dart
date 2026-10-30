@@ -397,7 +397,13 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     var playUrl = await site.liveSite
         .getPlayUrls(detail: detail.value!, quality: qualites[currentQuality]);
     if (playUrl.urls.isEmpty) {
-      SmartDialog.showToast("无法读取播放地址");
+      // 19+ 房间平台只在成人验证通过后才下发播放地址，跟"接口挂了"是两回事。
+      // 不区分的话用户只能看到一句没有任何信息量的"无法读取播放地址"。
+      final data = detail.value?.data;
+      final isAdult = data is Map && data["isAdult"] == true;
+      SmartDialog.showToast(
+        isAdult ? "该直播间为 19+ 内容，需要成人验证，无法播放" : "无法读取播放地址",
+      );
       return;
     }
     playUrls.value = playUrl.urls;
