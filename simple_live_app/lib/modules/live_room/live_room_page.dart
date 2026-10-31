@@ -318,6 +318,10 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                 width: 48,
                 height: 48,
                 borderRadius: 24,
+                // 自定义源的「头像」就是台标，和列表卡片走同一套请求头
+                headers: controller.site.id == Constant.kIptv
+                    ? NetImage.iptvHeaders
+                    : null,
               ),
             ),
             AppStyle.hGap12,

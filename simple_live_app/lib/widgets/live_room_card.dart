@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:remixicon/remixicon.dart';
 import 'package:simple_live_app/app/app_style.dart';
+import 'package:simple_live_app/app/constant.dart';
 import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/routes/app_navigation.dart';
@@ -34,6 +35,9 @@ class LiveRoomCard extends StatelessWidget {
                   fit: BoxFit.cover,
                   height: 110,
                   width: double.infinity,
+                  // 自定义源的台标是各种自建图床，不少会按 UA 拦非浏览器请求
+                  headers:
+                      site.id == Constant.kIptv ? NetImage.iptvHeaders : null,
                 ),
               ),
               Positioned(

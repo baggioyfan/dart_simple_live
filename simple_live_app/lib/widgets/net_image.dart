@@ -7,13 +7,31 @@ class NetImage extends StatelessWidget {
   final double? height;
   final BoxFit? fit;
   final double borderRadius;
-  const NetImage(this.picUrl,
-      {this.width,
-      this.height,
-      this.fit = BoxFit.cover,
-      this.borderRadius = 0,
-      Key? key})
-      : super(key: key);
+
+  /// 额外的请求头
+  ///
+  /// 只有自定义源（IPTV）会传 —— 那些台标来自各种自建图床，不少会按 UA
+  /// 拦掉非浏览器请求，不带头就只拿到 403。其它平台的图床有自己的防盗链
+  /// 规则，别去动它们的请求头，所以这里默认 null 保持原样。
+  final Map<String, String>? headers;
+
+  /// 自定义源台标请求头
+  ///
+  /// 和 IptvService 拉播放列表用的 UA 保持一致。
+  static const Map<String, String> iptvHeaders = {
+    'user-agent':
+        'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36',
+  };
+
+  const NetImage(
+    this.picUrl, {
+    this.width,
+    this.height,
+    this.fit = BoxFit.cover,
+    this.borderRadius = 0,
+    this.headers,
+    Key? key,
+  }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -59,6 +77,10 @@ class NetImage extends StatelessWidget {
             shape: BoxShape.rectangle,
             borderRadius: BorderRadius.circular(borderRadius),
             cacheWidth: cacheWidth,
+            headers: headers,
+            // 台标服务器经常接了连接却迟迟不吐数据，不设上限就一直卡在
+            // loading 态（转圈图标），比直接报错更让人摸不着头脑。
+            timeLimit: const Duration(seconds: 20),
             loadStateChanged: (e) {
               if (e.extendedImageLoadState == LoadState.loading) {
                 return const Icon(
