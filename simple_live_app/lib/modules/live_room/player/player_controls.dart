@@ -327,9 +327,15 @@ Widget buildFullControls(
                     onPressed: () {
                       showLinesInfo(controller);
                     },
-                    child: Text(
-                      controller.currentLineInfo.value,
-                      style: const TextStyle(color: Colors.white, fontSize: 15),
+                    child: ConstrainedBox(
+                      // 线路名可能是完整域名，不限制宽度会把旁边的按钮挤出去
+                      constraints: const BoxConstraints(maxWidth: 150),
+                      child: Text(
+                        controller.currentLineInfo.value,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.white, fontSize: 15),
+                      ),
                     ),
                   ),
                   IconButton(
@@ -590,9 +596,14 @@ Widget buildControls(
                     onPressed: () {
                       controller.showPlayUrlsSheet();
                     },
-                    child: Text(
-                      controller.currentLineInfo.value,
-                      style: const TextStyle(color: Colors.white, fontSize: 15),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 150),
+                      child: Text(
+                        controller.currentLineInfo.value,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.white, fontSize: 15),
+                      ),
                     ),
                   ),
                 ),
@@ -696,7 +707,8 @@ void showLinesInfo(LiveRoomController controller) {
           selected: controller.currentLineIndex == i,
           title: Text.rich(
             TextSpan(
-              text: "线路${i + 1}",
+              // 自定义源会给出域名（「cdn1.example.com」），其它平台退回「线路N」
+              text: controller.lineLabel(i),
               children: [
                 WidgetSpan(
                     child: Container(
@@ -718,6 +730,8 @@ void showLinesInfo(LiveRoomController controller) {
               ],
             ),
             style: const TextStyle(fontSize: 14),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
           minLeadingWidth: 16,
           onTap: () {

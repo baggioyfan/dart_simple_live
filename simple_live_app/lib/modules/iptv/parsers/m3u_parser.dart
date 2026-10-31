@@ -7,6 +7,7 @@ class M3uPlaylist {
     this.epgUrl = '',
     this.catchupMode = '',
     this.catchupSource = '',
+    this.mergedCount = 0,
     List<String>? errors,
   }) : errors = errors ?? <String>[];
 
@@ -20,6 +21,11 @@ class M3uPlaylist {
   final String catchupSource;
 
   final List<IptvChannel> channels;
+
+  /// 被合并掉的重复条目数（同一个台的多条线路）
+  ///
+  /// 导入/刷新时用来告诉用户「N 条合并成一条」，否则频道数变少会让人以为丢台了。
+  final int mergedCount;
 
   /// 解析过程中的非致命问题，用于导入后提示
   final List<String> errors;
@@ -39,6 +45,12 @@ class M3uParser {
   static const String _extInf = '#EXTINF:';
   static const String _extGrp = '#EXTGRP:';
   static const String _extM3u = '#EXTM3U';
+
+  /// 单个频道最多保留多少条线路
+  ///
+  /// 有的列表把一个台挂了几十条 CDN，全留下来线路面板会长得没法看，
+  /// 而且真到要手动切的地步，前 20 条和全部也没什么区别。
+  static const int maxLines = 20;
 
   static final RegExp _attrRegex = RegExp(r'([\w-]+)="([^"]*)"');
   static final RegExp _schemeRegex = RegExp(r'^[a-zA-Z][a-zA-Z0-9+.\-]*://');
@@ -72,6 +84,10 @@ class M3uParser {
     String? directiveGroup;
 
     final usedIds = <String>{};
+    // 判重索引：一个 tvg-id 可能被多个台共用（列表填错时），所以是一对多
+    final byTvgId = <String, List<IptvChannel>>{};
+    final byName = <String, IptvChannel>{};
+    var merged = 0;
 
     for (var i = 0; i < lines.length; i++) {
       final line = lines[i].trim();
@@ -134,6 +150,62 @@ class M3uParser {
 
       final tvgId = (attrs['tvg-id'] ?? '').trim();
       final group = (attrs['group-title'] ?? directiveGroup ?? '').trim();
+      final logo = (attrs['tvg-logo'] ?? '').trim();
+      final channelNumber = int.tryParse((attrs['tvg-chno'] ?? '').trim());
+      final channelCatchupMode = (attrs['catchup'] ?? catchupMode).trim();
+      final channelCatchupSource =
+          (attrs['catchup-source'] ?? catchupSource).trim();
+
+      // 同一个台在播放列表里经常出现多次（不同 CDN 的地址），合并成一条记录，
+      // 多出来的地址进 altUrls 当备用线路。
+      // 先按 tvg-id 认，再按归一化后的频道名认 —— 有些列表同一个台第一次
+      // 没写 tvg-id，只靠 tvg-id 会漏合并。
+      final idKey = _normalize(tvgId);
+      final nameKey = _normalize(name);
+
+      IptvChannel? existing;
+      if (idKey.isNotEmpty) {
+        // tvg-id 命中还要看名字像不像。不少列表把一堆不相干的台都填成同一个
+        // 占位值（"0"、"none"），只认 id 会把整个列表合并成一个频道。
+        for (final candidate in byTvgId[idKey] ?? const <IptvChannel>[]) {
+          if (_looksSameChannel(nameKey, _normalize(candidate.name))) {
+            existing = candidate;
+            break;
+          }
+        }
+      }
+      existing ??= nameKey.isEmpty ? null : byName[nameKey];
+
+      if (existing != null) {
+        merged++;
+        // 只补首次出现时缺失的字段，已有的不覆盖，保证顺序和名称以第一次为准
+        if (existing.logo.isEmpty && logo.isNotEmpty) {
+          existing.logo = logo;
+        }
+        if (existing.channelNumber == null && channelNumber != null) {
+          existing.channelNumber = channelNumber;
+        }
+        if (existing.catchupMode.isEmpty && channelCatchupMode.isNotEmpty) {
+          existing.catchupMode = channelCatchupMode;
+        }
+        if (existing.catchupSource.isEmpty &&
+            channelCatchupSource.isNotEmpty) {
+          existing.catchupSource = channelCatchupSource;
+        }
+        if (existing.tvgId.isEmpty && tvgId.isNotEmpty) {
+          existing.tvgId = tvgId;
+          if (idKey.isNotEmpty) {
+            final list = byTvgId[idKey] ??= <IptvChannel>[];
+            if (!list.contains(existing)) list.add(existing);
+          }
+        }
+        // 线路数封顶：见过一个台挂几十条 CDN 的列表，全留着线路面板没法看
+        if (existing.altUrls.length < maxLines - 1 &&
+            !existing.allUrls.contains(line)) {
+          existing.altUrls.add(line);
+        }
+        continue;
+      }
 
       // 频道ID优先用 tvg-id（与 EPG 对应），退化到频道名，重名时加序号
       var baseKey = tvgId.isNotEmpty ? tvgId : name;
@@ -145,22 +217,25 @@ class M3uParser {
       }
       usedIds.add(channelId);
 
-      channels.add(
-        IptvChannel(
-          id: channelId,
-          sourceId: sourceId,
-          name: name,
-          streamUrl: line,
-          groupTitle: group.isEmpty ? '未分组' : group,
-          logo: (attrs['tvg-logo'] ?? '').trim(),
-          tvgId: tvgId,
-          channelNumber: int.tryParse((attrs['tvg-chno'] ?? '').trim()),
-          catchupMode: (attrs['catchup'] ?? catchupMode).trim(),
-          catchupSource: (attrs['catchup-source'] ?? catchupSource).trim(),
-          // 记住它在播放列表里的位置，后续排序全靠这个
-          order: channels.length,
-        ),
+      final channel = IptvChannel(
+        id: channelId,
+        sourceId: sourceId,
+        name: name,
+        streamUrl: line,
+        groupTitle: group.isEmpty ? '未分组' : group,
+        logo: logo,
+        tvgId: tvgId,
+        channelNumber: channelNumber,
+        catchupMode: channelCatchupMode,
+        catchupSource: channelCatchupSource,
+        // 记住它在播放列表里的位置，后续排序全靠这个
+        order: channels.length,
       );
+      channels.add(channel);
+      if (idKey.isNotEmpty) {
+        (byTvgId[idKey] ??= <IptvChannel>[]).add(channel);
+      }
+      if (nameKey.isNotEmpty) byName[nameKey] = channel;
     }
 
     if (pendingAttrs != null) {
@@ -175,8 +250,46 @@ class M3uParser {
       epgUrl: epgUrl,
       catchupMode: catchupMode,
       catchupSource: catchupSource,
+      mergedCount: merged,
       errors: errors,
     );
+  }
+
+  /// 归一化后用于判重：小写、全角转半角、去掉空格和常见分隔符
+  ///
+  /// 只为了让「CCTV-1」「CCTV1」「ＣＣＴＶ－１」认成同一个台。
+  /// 特意不去掉「高清」「HD」这类后缀 —— 那是不同的频道，合了反而错。
+  String _normalize(String value) {
+    final buffer = StringBuffer();
+    for (final raw in value.toLowerCase().runes) {
+      // 全角 ASCII 段整体平移到半角
+      final rune = (raw >= 0xFF01 && raw <= 0xFF5E) ? raw - 0xFEE0 : raw;
+      final ch = String.fromCharCode(rune);
+      if (ch.trim().isEmpty) continue;
+      if (_ignoredSeparators.contains(ch)) continue;
+      buffer.write(ch);
+    }
+    return buffer.toString();
+  }
+
+  /// 判重时忽略的分隔符
+  static const Set<String> _ignoredSeparators = {
+    '-',
+    '_',
+    '.',
+    '·',
+    '•',
+    ':',
+    '|',
+  };
+
+  /// 两个归一化后的频道名是不是同一个台
+  ///
+  /// 相等，或者一个是另一个的子串（「cctv1」/「cctv1高清」）。名字缺失时没法比，
+  /// 只能信 tvg-id，直接返回 true。
+  bool _looksSameChannel(String a, String b) {
+    if (a.isEmpty || b.isEmpty) return true;
+    return a == b || a.contains(b) || b.contains(a);
   }
 
   /// 解析 `key="value" key2="value2"` 形式的属性

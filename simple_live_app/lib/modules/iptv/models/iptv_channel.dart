@@ -17,7 +17,8 @@ class IptvChannel {
     this.catchupMode = '',
     this.catchupSource = '',
     this.order = 0,
-  });
+    List<String>? altUrls,
+  }) : altUrls = altUrls ?? <String>[];
 
   /// 频道ID = 源ID + 频道标识，全局唯一
   final String id;
@@ -55,6 +56,30 @@ class IptvChannel {
   /// 迭代，重启后拿到的顺序和导入时看到的不一样，所以必须把顺序显式存下来。
   int order;
 
+  /// 同一频道的其它线路
+  ///
+  /// IPTV 播放列表里同一个台经常出现多次（同一个频道的不同 CDN 地址），
+  /// 解析时按 tvg-id / 频道名合并成一条记录：第一条留在 [streamUrl]，
+  /// 其余的放这里。播放页的「切换线路」就是在这几条之间切。
+  ///
+  /// 老数据没有这一列，读出来是空列表，重新刷新源之后才会填上。
+  List<String> altUrls;
+
+  /// 主地址 + 备用地址，按出现顺序去重、去掉空串
+  List<String> get allUrls {
+    final seen = <String>{};
+    final result = <String>[];
+    for (final url in <String>[streamUrl, ...altUrls]) {
+      final value = url.trim();
+      if (value.isEmpty) continue;
+      if (seen.add(value)) result.add(value);
+    }
+    return result;
+  }
+
+  /// 线路总数
+  int get lineCount => allUrls.length;
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'sourceId': sourceId,
@@ -67,6 +92,7 @@ class IptvChannel {
         'catchupMode': catchupMode,
         'catchupSource': catchupSource,
         'order': order,
+        'altUrls': altUrls,
       };
 
   factory IptvChannel.fromJson(Map<String, dynamic> json) => IptvChannel(
@@ -81,7 +107,14 @@ class IptvChannel {
         catchupMode: (json['catchupMode'] ?? '') as String,
         catchupSource: (json['catchupSource'] ?? '') as String,
         order: (json['order'] ?? 0) as int,
+        altUrls: _stringList(json['altUrls']),
       );
+}
+
+/// Hive / JSON 里读出来的 List 元素类型是 dynamic，统一转成 List<String>
+List<String> _stringList(dynamic value) {
+  if (value is! List) return <String>[];
+  return value.map((e) => e?.toString() ?? '').where((e) => e.isNotEmpty).toList();
 }
 
 class IptvChannelAdapter extends TypeAdapter<IptvChannel> {
@@ -107,13 +140,14 @@ class IptvChannelAdapter extends TypeAdapter<IptvChannel> {
       catchupSource: (fields[9] ?? '') as String,
       // 老数据没有这一列，读出来是 null，落到 0 由 IptvService 统一迁移
       order: (fields[10] ?? 0) as int,
+      altUrls: _stringList(fields[11]),
     );
   }
 
   @override
   void write(BinaryWriter writer, IptvChannel obj) {
     writer
-      ..writeByte(11)
+      ..writeByte(12)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -135,6 +169,8 @@ class IptvChannelAdapter extends TypeAdapter<IptvChannel> {
       ..writeByte(9)
       ..write(obj.catchupSource)
       ..writeByte(10)
-      ..write(obj.order);
+      ..write(obj.order)
+      ..writeByte(11)
+      ..write(obj.altUrls);
   }
 }

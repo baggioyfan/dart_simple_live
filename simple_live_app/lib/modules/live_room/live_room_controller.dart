@@ -72,11 +72,29 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   /// 线路数据
   RxList<String> playUrls = RxList<String>();
 
+  /// 每条线路的显示名，与 [playUrls] 一一对应
+  ///
+  /// 目前只有自定义源会填（取地址里的域名，比如「cdn1.example.com」），
+  /// 其它平台是空的，界面退回「线路1/线路2」。
+  RxList<String> playUrlLabels = RxList<String>();
+
   Map<String, String>? playHeaders;
 
   /// 当前线路
   var currentLineIndex = -1;
   var currentLineInfo = "".obs;
+
+  /// 第 [index] 条线路该显示成什么
+  ///
+  /// 有名字用名字，没有就用「线路N」。`currentLineInfo` 和线路面板都走这里，
+  /// 免得两边显示的东西对不上。
+  String lineLabel(int index) {
+    if (index >= 0 && index < playUrlLabels.length) {
+      final label = playUrlLabels[index].trim();
+      if (label.isNotEmpty) return label;
+    }
+    return "线路${index + 1}";
+  }
 
   /// 退出倒计时
   var countdown = 60.obs;
@@ -407,9 +425,10 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       return;
     }
     playUrls.value = playUrl.urls;
+    playUrlLabels.value = playUrl.labels ?? <String>[];
     playHeaders = playUrl.headers;
     currentLineIndex = 0;
-    currentLineInfo.value = "线路${currentLineIndex + 1}";
+    currentLineInfo.value = lineLabel(currentLineIndex);
     //重置错误次数
     mediaErrorRetryCount = 0;
     initPlaylist();
@@ -422,8 +441,10 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     final value = url.trim();
     if (value.isEmpty) return;
     playUrls.value = [value];
+    // 回看地址是现拼的，没有线路名
+    playUrlLabels.clear();
     currentLineIndex = 0;
-    currentLineInfo.value = "线路1";
+    currentLineInfo.value = lineLabel(currentLineIndex);
     mediaErrorRetryCount = 0;
     liveStatus.value = true;
     initPlaylist();
@@ -449,7 +470,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   }
 
   void initPlaylist() async {
-    currentLineInfo.value = "线路${currentLineIndex + 1}";
+    currentLineInfo.value = lineLabel(currentLineIndex);
     errorMsg.value = "";
 
     final mediaList = playUrls.map((url) {
@@ -467,7 +488,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   }
 
   void setPlayer() async {
-    currentLineInfo.value = "线路${currentLineIndex + 1}";
+    currentLineInfo.value = lineLabel(currentLineIndex);
     errorMsg.value = "";
 
     await player.jump(currentLineIndex);
@@ -724,7 +745,11 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
           itemBuilder: (_, i) {
             return RadioListTile(
               value: i,
-              title: Text("线路${i + 1}"),
+              title: Text(
+                lineLabel(i),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
               secondary: Text(
                 playUrls[i].contains(".flv") ? "FLV" : "HLS",
               ),

@@ -145,6 +145,17 @@ class IptvSite extends LiveSite {
     required LiveRoomDetail detail,
     required LivePlayQuality quality,
   }) async {
+    // 频道把所有线路都带着，播放页的「切换线路」就是在这些地址之间切。
+    // 回看走的是 playCustomUrl，不经过这里，所以不用区分直播/回看。
+    final channel =
+        detail.data is IptvChannel ? detail.data as IptvChannel : null;
+    final urls = channel?.allUrls ?? <String>[];
+
+    if (urls.isNotEmpty) {
+      return LivePlayUrl(urls: urls, labels: _labelsOf(channel!, urls.length));
+    }
+
+    // 兜底：拿不到频道对象时退回原来的单地址逻辑
     final data = quality.data;
     final url = data is String && data.trim().isNotEmpty
         ? data.trim()
@@ -154,6 +165,40 @@ class IptvSite extends LiveSite {
     }
     // headers 暂时留空：当前源没有 #EXTVLCOPT，需要时在这里返回
     return LivePlayUrl(urls: [url]);
+  }
+
+  /// 线路显示名：取地址里的主机名
+  ///
+  /// 同一个源里同一个台的几条线路，区别基本就是 CDN 域名不一样，
+  /// 用域名标最直观 —— 源名和分组在这个层面没有区分度（全一样）。
+  /// 拿不到域名的（udp / rtp 这类）留空，界面会退回「线路N」。
+  List<String> _labelsOf(IptvChannel channel, int count) {
+    final urls = channel.allUrls;
+    final used = <String, int>{};
+    final result = <String>[];
+
+    for (var i = 0; i < count; i++) {
+      final host = i < urls.length ? _hostOf(urls[i]) : '';
+      if (host.isEmpty) {
+        result.add('');
+        continue;
+      }
+      // 同一个域名下挂了多个端口/路径时，补个序号才分得清
+      final seen = (used[host] ?? 0) + 1;
+      used[host] = seen;
+      result.add(seen == 1 ? host : '$host · $seen');
+    }
+
+    // 一条域名都没解析出来就别占位了，交给界面显示「线路N」
+    if (result.every((e) => e.isEmpty)) return <String>[];
+    return result;
+  }
+
+  String _hostOf(String url) {
+    final value = url.trim();
+    if (value.isEmpty) return '';
+    final uri = Uri.tryParse(value);
+    return uri?.host.trim() ?? '';
   }
 
   @override
@@ -180,12 +225,15 @@ class IptvSite extends LiveSite {
   }
 
   LiveRoomItem _toRoomItem(IptvChannel channel, [EpgProgramme? current]) {
+    final subtitle = current?.title ?? channel.groupTitle;
+    final lines = channel.lineCount;
     return LiveRoomItem(
       roomId: channel.id,
       title: channel.name,
       cover: channel.logo,
-      // 有节目单时副标题显示正在播的节目，否则退回分组名
-      userName: current?.title ?? channel.groupTitle,
+      // 有节目单时副标题显示正在播的节目，否则退回分组名；
+      // 多线路的台再缀上线路数，让用户知道点进去有得选
+      userName: lines > 1 ? '$subtitle · $lines线路' : subtitle,
       online: 0,
     );
   }
