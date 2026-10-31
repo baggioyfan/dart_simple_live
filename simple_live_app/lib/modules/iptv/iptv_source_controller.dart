@@ -98,10 +98,15 @@ class IptvSourceController extends GetxController {
     busy.value = true;
     SmartDialog.showLoading(msg: "正在刷新");
     try {
-      await _service.refreshSource(source.id);
+      final merged = await _service.refreshSource(source.id);
       reload();
       _reloadLiveTabs();
-      SmartDialog.showToast("已更新 ${_service.getChannels(source.id).length} 个频道");
+      final count = _service.getChannels(source.id).length;
+      SmartDialog.showToast(
+        merged > 0
+            ? "已更新 $count 个频道（合并 $merged 条重复线路）"
+            : "已更新 $count 个频道",
+      );
     } catch (e) {
       Log.logPrint(e);
       SmartDialog.showToast("刷新失败：${_message(e)}");

@@ -150,7 +150,10 @@ class IptvService extends GetxService {
   }
 
   /// 重新拉取指定源的播放列表，整体替换其频道
-  Future<void> refreshSource(String sourceId) async {
+  ///
+  /// 返回值是这次合并掉的重复条目数（同一个台的多条线路）。频道数会因为合并
+  /// 变少，界面拿它来提示，否则用户会以为丢了台。
+  Future<int> refreshSource(String sourceId) async {
     final source = getSource(sourceId);
     if (source == null) {
       throw Exception('源不存在');
@@ -183,6 +186,8 @@ class IptvService extends GetxService {
     // 频道变了，旧节目单作废
     _epgCache.remove(sourceId);
     _epgCacheTime.remove(sourceId);
+
+    return playlist.mergedCount;
   }
 
   Future<void> refreshAll() async {
