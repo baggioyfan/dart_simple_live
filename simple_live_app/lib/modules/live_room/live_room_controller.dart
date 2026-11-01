@@ -18,6 +18,7 @@ import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/models/db/follow_user.dart';
 import 'package:simple_live_app/models/db/history.dart';
+import 'package:simple_live_app/modules/iptv/iptv_probe.dart';
 import 'package:simple_live_app/modules/live_room/player/player_controller.dart';
 import 'package:simple_live_app/modules/settings/danmu_settings_page.dart';
 import 'package:simple_live_app/services/db_service.dart';
@@ -431,7 +432,54 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     currentLineInfo.value = lineLabel(currentLineIndex);
     //重置错误次数
     mediaErrorRetryCount = 0;
+    _lastLineSwitchAt = null;
     initPlaylist();
+
+    // 自定义源：一边播一边探。探到当前线路是死的就立刻跳走，
+    // 不用等播放器自己超时 —— 域名黑洞时它能干等几十秒。
+    if (site.id == Constant.kIptv) {
+      unawaited(probePlayLines());
+    }
+  }
+
+  /// 探测结果只用于「跳线」，不做线路排序
+  ///
+  /// 顺序保持 m3u 里的原样：用户看到的「线路 1/2/3」和源文件对得上，
+  /// 手动切换时也不至于莫名其妙换了条路。要跳线只在探测确认当前这条不通、
+  /// 且播放器还没出声时才做 —— 探测本身会误判（源站限流、瞬时抖动），
+  /// 已经播上的画面不能被它打断。
+  int _probeToken = 0;
+
+  /// 页面已关闭，探测回调不要再动播放器
+  bool _disposed = false;
+
+  Future<void> probePlayLines() async {
+    final token = ++_probeToken;
+    final urls = List<String>.from(playUrls);
+    // 只有一条线路时探了也没得换，省下这几秒
+    if (urls.length < 2) return;
+
+    // 先让播放器跑一会儿：能播就不用探了，探测的连接也省下来
+    // —— 有些源限制并发连接，探测本身可能把播放挤掉。
+    await Future.delayed(const Duration(milliseconds: 1200));
+    if (_disposed || token != _probeToken) return;
+    if (player.state.playing) return;
+
+    final results = await IptvProbe.probeAll(urls);
+    if (_disposed || token != _probeToken) return;
+    // 已经播起来了就别动
+    if (player.state.playing) return;
+    if (currentLineIndex < 0 || currentLineIndex >= results.length) return;
+    // 当前线路探得通，什么都不用做
+    if (results[currentLineIndex]) return;
+
+    final alive = IptvProbe.firstAlive(results);
+    if (alive < 0) {
+      SmartDialog.showToast("所有线路均无响应，源可能已失效");
+      return;
+    }
+    Log.d("线路${currentLineIndex + 1}探测不通，跳到线路${alive + 1}");
+    changePlayLine(alive);
   }
 
   /// 播放一个外部地址（IPTV 回看用）
@@ -446,6 +494,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     currentLineIndex = 0;
     currentLineInfo.value = lineLabel(currentLineIndex);
     mediaErrorRetryCount = 0;
+    _lastLineSwitchAt = null;
     liveStatus.value = true;
     initPlaylist();
   }
@@ -466,7 +515,21 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     currentLineIndex = index;
     //重置错误次数
     mediaErrorRetryCount = 0;
+    _lastLineSwitchAt = DateTime.now();
     setPlayer();
+  }
+
+  /// 上一次换线的时刻
+  ///
+  /// 自定义源不重试，直接换线，但 libmpv 一次打开失败往往会连着抛好几条
+  /// 错误日志。不设防的话这几条会把后面的线路一口气跳光 —— 明明线路 2
+  /// 是好的，用户看到的却是「播放失败」。这里只认换线后第一条错误。
+  DateTime? _lastLineSwitchAt;
+
+  bool get _canSwitchLine {
+    final at = _lastLineSwitchAt;
+    if (at == null) return true;
+    return DateTime.now().difference(at) > const Duration(milliseconds: 300);
   }
 
   void initPlaylist() async {
@@ -494,10 +557,22 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     await player.jump(currentLineIndex);
   }
 
+  /// 一条线路失败后重试几次再换线
+  ///
+  /// 自定义源不重试：IPTV 的地址要么能播要么不能播，把同一个 404 再试两遍
+  /// 只是白等，直接换下一条更快。其它平台保留原来的两次。
+  int get maxMediaRetry => site.id == Constant.kIptv ? 0 : 2;
+
+  /// 当前正在播的地址，越界返回 null
+  String? get currentPlayUrl =>
+      currentLineIndex >= 0 && currentLineIndex < playUrls.length
+          ? playUrls[currentLineIndex]
+          : null;
+
   @override
   void mediaEnd() async {
     super.mediaEnd();
-    if (mediaErrorRetryCount < 2) {
+    if (mediaErrorRetryCount < maxMediaRetry) {
       Log.d("播放结束，尝试第${mediaErrorRetryCount + 1}次刷新");
       if (mediaErrorRetryCount == 1) {
         //延迟一秒再刷新
@@ -513,7 +588,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     // 遍历线路，如果全部链接都断开就是直播结束了
     if (playUrls.length - 1 == currentLineIndex) {
       liveStatus.value = false;
-    } else {
+    } else if (_canSwitchLine) {
       changePlayLine(currentLineIndex + 1);
 
       //setPlayer();
@@ -523,8 +598,17 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   int mediaErrorRetryCount = 0;
   @override
   void mediaError(String error) async {
-    super.mediaEnd();
-    if (mediaErrorRetryCount < 2) {
+    super.mediaError(error);
+    // 播放器报的网络类错误也记一笔：探测通过但流打不开的情况，
+    // 说明这个域名对当前网络不通，下次探测早点放弃
+    final url = currentPlayUrl;
+    if (site.id == Constant.kIptv &&
+        url != null &&
+        IptvProbe.looksLikeNetworkError(error)) {
+      IptvProbe.reportFailed(url);
+    }
+
+    if (mediaErrorRetryCount < maxMediaRetry) {
       Log.d("播放失败，尝试第${mediaErrorRetryCount + 1}次刷新");
       if (mediaErrorRetryCount == 1) {
         //延迟一秒再刷新
@@ -539,7 +623,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     if (playUrls.length - 1 == currentLineIndex) {
       errorMsg.value = "播放失败";
       SmartDialog.showToast("播放失败:$error");
-    } else {
+    } else if (_canSwitchLine) {
       //currentLineIndex += 1;
       //setPlayer();
       changePlayLine(currentLineIndex + 1);
@@ -1110,6 +1194,8 @@ ${error?.stackTrace}''');
 
   @override
   void onClose() {
+    _disposed = true;
+    _probeToken++;
     WidgetsBinding.instance.removeObserver(this);
     scrollController.removeListener(scrollListener);
     autoExitTimer?.cancel();

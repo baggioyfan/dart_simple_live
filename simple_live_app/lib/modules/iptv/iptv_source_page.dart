@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import 'package:remixicon/remixicon.dart';
 import 'package:simple_live_app/modules/iptv/iptv_source_controller.dart';
 import 'package:simple_live_app/modules/iptv/models/iptv_source.dart';
+import 'package:simple_live_app/modules/iptv/models/iptv_source_health.dart';
 
 /// IPTV 直播源管理页
 ///
@@ -16,6 +17,15 @@ class IptvSourcePage extends GetView<IptvSourceController> {
       appBar: AppBar(
         title: const Text("直播源设置"),
         actions: [
+          Obx(
+            () => IconButton(
+              icon: const Icon(Icons.network_check),
+              tooltip: "检测全部源的可用性",
+              onPressed: controller.probing.value
+                  ? null
+                  : () => controller.probeAllSources(),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.add),
             tooltip: "添加直播源",
@@ -197,12 +207,7 @@ class IptvSourcePage extends GetView<IptvSourceController> {
           color: source.enabled ? null : Colors.grey,
         ),
       ),
-      subtitle: Text(
-        _subtitle(source),
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: 12),
-      ),
+      subtitle: _subtitle(source),
       isThreeLine: true,
       trailing: PopupMenuButton<String>(
         icon: const Icon(Icons.more_vert),
@@ -211,6 +216,10 @@ class IptvSourcePage extends GetView<IptvSourceController> {
           const PopupMenuItem(
             value: "refresh",
             child: Text("刷新频道"),
+          ),
+          const PopupMenuItem(
+            value: "probe",
+            child: Text("检测可用性"),
           ),
           PopupMenuItem(
             value: "toggle",
@@ -229,7 +238,10 @@ class IptvSourcePage extends GetView<IptvSourceController> {
     );
   }
 
-  String _subtitle(IptvSource source) {
+  /// 副标题：可用性 + 频道数 + 更新时间 + 地址
+  ///
+  /// 可用性放在最前面：源多了以后，「哪个该删」比「什么时候更新的」重要。
+  Widget _subtitle(IptvSource source) {
     final buffer = StringBuffer("${source.channelCount} 个频道");
     final last = source.lastUpdate;
     if (last != null) {
@@ -243,7 +255,34 @@ class IptvSourcePage extends GetView<IptvSourceController> {
       buffer.write(" · 含节目单");
     }
     buffer.write("\n${source.url}");
-    return buffer.toString();
+
+    final health = controller.health[source.id];
+    return Text.rich(
+      TextSpan(
+        children: [
+          if (health != null && !health.unknown) ...[
+            TextSpan(
+              text: health.text,
+              style: TextStyle(
+                color: _healthColor(health),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const TextSpan(text: " · "),
+          ],
+          TextSpan(text: buffer.toString()),
+        ],
+      ),
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(fontSize: 12),
+    );
+  }
+
+  Color _healthColor(IptvSourceHealth health) {
+    if (health.allDead) return Colors.red;
+    if (health.allAlive) return Colors.green;
+    return Colors.orange;
   }
 
   Future<void> _onAction(
@@ -254,6 +293,9 @@ class IptvSourcePage extends GetView<IptvSourceController> {
     switch (action) {
       case "refresh":
         await controller.refreshSource(source);
+        break;
+      case "probe":
+        await controller.probeSource(source);
         break;
       case "toggle":
         await controller.toggleEnabled(source);

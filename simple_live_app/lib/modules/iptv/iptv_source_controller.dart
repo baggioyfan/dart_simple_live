@@ -4,9 +4,12 @@ import 'package:simple_live_app/app/constant.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/modules/iptv/iptv_auto_refresh_service.dart';
+import 'package:simple_live_app/modules/iptv/iptv_probe.dart';
 import 'package:simple_live_app/modules/iptv/iptv_service.dart';
 import 'package:simple_live_app/modules/iptv/iptv_tab_refresher.dart';
+import 'package:simple_live_app/modules/iptv/models/iptv_channel.dart';
 import 'package:simple_live_app/modules/iptv/models/iptv_source.dart';
+import 'package:simple_live_app/modules/iptv/models/iptv_source_health.dart';
 
 class IptvSourceController extends GetxController {
   IptvService get _service => IptvService.instance;
@@ -15,6 +18,13 @@ class IptvSourceController extends GetxController {
 
   final RxList<IptvSource> sources = <IptvSource>[].obs;
   final RxBool busy = false.obs;
+
+  /// 每个源的采样可用性，key 是源 id
+  final RxMap<String, IptvSourceHealth> health =
+      <String, IptvSourceHealth>{}.obs;
+
+  /// 正在跑可用性检测
+  final RxBool probing = false.obs;
 
   /// 定期更新开关与间隔，镜像自 [IptvAutoRefreshService]，供界面响应式绑定
   final RxBool autoRefreshEnabled = true.obs;
@@ -100,6 +110,8 @@ class IptvSourceController extends GetxController {
     try {
       final merged = await _service.refreshSource(source.id);
       reload();
+      // 频道换了，旧的可用性结果作废
+      health.remove(source.id);
       _reloadLiveTabs();
       final count = _service.getChannels(source.id).length;
       SmartDialog.showToast(
@@ -162,6 +174,7 @@ class IptvSourceController extends GetxController {
     try {
       final merged = await _service.refreshSource(source.id);
       reload();
+      health.remove(source.id);
       _reloadLiveTabs();
       final count = _service.getChannels(source.id).length;
       SmartDialog.showToast(
@@ -220,6 +233,7 @@ class IptvSourceController extends GetxController {
 
   Future<void> remove(IptvSource source) async {
     await _service.deleteSource(source.id);
+    health.remove(source.id);
     reload();
     _reloadLiveTabs();
     SmartDialog.showToast("已删除");
@@ -249,6 +263,8 @@ class IptvSourceController extends GetxController {
     try {
       await _service.refreshAll();
       reload();
+      // 所有源都重拉过，可用性结果全部作废
+      health.clear();
       _reloadLiveTabs();
       SmartDialog.showToast("已更新 ${sources.length} 个源");
     } catch (e) {
@@ -258,6 +274,83 @@ class IptvSourceController extends GetxController {
       SmartDialog.dismiss(status: SmartStatus.loading);
       busy.value = false;
     }
+  }
+
+  // ---------------- 可用性检测 ----------------
+
+  /// 每个源探几个频道当样本
+  ///
+  /// 探得太少没有代表性，探得太多既慢又容易被源站当爬虫。
+  /// 3 个样本足够区分「全通 / 部分通 / 全挂」这三种情况。
+  static const int sampleSize = 3;
+
+  /// 检测一个源的可用性
+  ///
+  /// [silent] 为 true 时不弹 loading、不弹结果 —— 批量检测时由外层统一处理，
+  /// 否则每个源都要闪一次弹窗。
+  Future<void> probeSource(IptvSource source, {bool silent = false}) async {
+    if (!silent) SmartDialog.showLoading(msg: "正在检测线路");
+    try {
+      final channels = _service.getChannels(source.id);
+      if (channels.isEmpty) {
+        health[source.id] = const IptvSourceHealth(alive: 0, total: 0);
+        return;
+      }
+      final samples = _sampleChannels(channels);
+      final results = await IptvProbe.probeAll(
+        [for (final channel in samples) channel.streamUrl],
+      );
+      health[source.id] = IptvSourceHealth(
+        alive: results.where((alive) => alive).length,
+        total: results.length,
+      );
+    } catch (e) {
+      // 单个源探挂了不该让整批检测中断
+      Log.logPrint(e);
+    } finally {
+      if (!silent) {
+        SmartDialog.dismiss(status: SmartStatus.loading);
+        SmartDialog.showToast(
+          "「${source.name}」${health[source.id]?.text ?? "检测失败"}",
+        );
+      }
+    }
+  }
+
+  /// 检测全部源
+  ///
+  /// 串行跑，不并发 —— 几个源同时铺开探测会把家里的带宽打满，
+  /// 本来能用的源反而被探成不可用。
+  Future<void> probeAllSources() async {
+    if (probing.value || sources.isEmpty) return;
+    probing.value = true;
+    SmartDialog.showLoading(msg: "正在检测线路");
+    try {
+      for (final source in sources) {
+        await probeSource(source, silent: true);
+      }
+      final dead = sources
+          .where((source) => health[source.id]?.allDead ?? false)
+          .length;
+      SmartDialog.showToast(
+        dead > 0 ? "检测完成，$dead 个源完全不可用" : "检测完成，全部源都有响应",
+      );
+    } finally {
+      SmartDialog.dismiss(status: SmartStatus.loading);
+      probing.value = false;
+    }
+  }
+
+  /// 均匀取几个频道
+  ///
+  /// 不取开头那几个：不少源的前几个台是专门留着测试的，永远是好的，
+  /// 拿它们当样本会高估整个源的健康度。
+  List<IptvChannel> _sampleChannels(List<IptvChannel> channels) {
+    if (channels.length <= sampleSize) return channels;
+    final step = channels.length / sampleSize;
+    return [
+      for (var i = 0; i < sampleSize; i++) channels[(i * step).floor()],
+    ];
   }
 
   String _message(Object e) {
