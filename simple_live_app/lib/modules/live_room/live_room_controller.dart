@@ -488,6 +488,9 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
           // 比探测结论更可信
           if (lineAlive[index] == false) return;
           lineAlive[index] = alive;
+          // 探到一条能用的就别等整轮探完了 —— 十几条线路的台，
+          // 等全部探完用户早就等急了
+          if (alive) _decideLine();
         },
       );
     } finally {
