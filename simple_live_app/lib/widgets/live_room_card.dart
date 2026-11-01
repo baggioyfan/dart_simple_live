@@ -16,6 +16,10 @@ class LiveRoomCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 自定义源的「封面」是台标，比例五花八门（16:9、4:3、1:1 都有），
+    // 用 cover 会按卡片形状裁掉一部分，所以改成 contain 完整显示。
+    // 其它平台是视频截图，本来就该铺满，保持 cover。
+    final isIptv = site.id == Constant.kIptv;
     return ShadowCard(
       onTap: () {
         AppNavigator.toLiveRoomDetail(site: site, roomId: item.roomId);
@@ -32,12 +36,11 @@ class LiveRoomCard extends StatelessWidget {
                 ),
                 child: NetImage(
                   item.cover,
-                  fit: BoxFit.cover,
+                  fit: isIptv ? BoxFit.contain : BoxFit.cover,
                   height: 110,
                   width: double.infinity,
                   // 自定义源的台标是各种自建图床，不少会按 UA 拦非浏览器请求
-                  headers:
-                      site.id == Constant.kIptv ? NetImage.iptvHeaders : null,
+                  headers: isIptv ? NetImage.iptvHeaders : null,
                 ),
               ),
               Positioned(
