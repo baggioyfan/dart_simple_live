@@ -26,8 +26,9 @@ class IptvProbe {
   /// 同时探测的线路数
   ///
   /// IPTV 源普遍限制并发连接数，一次铺开太多会被当成滥用，
-  /// 反而把本来能用的线路探成不可用。
-  static const int maxConcurrent = 3;
+  /// 反而把本来能用的线路探成不可用。但太小又追不上播放器的
+  /// 错误级联 —— 一个台十几条线路时，探不完就等于没探。
+  static const int maxConcurrent = 4;
 
   /// 读这么多就够判断是不是 m3u8 了
   static const int _probeBytes = 2048;
@@ -109,7 +110,13 @@ class IptvProbe {
   }
 
   /// 批量探测，返回值与 [urls] 一一对应
-  static Future<List<bool>> probeAll(List<String> urls) async {
+  ///
+  /// [onResult] 每探完一条就回调一次，调用方可以边探边更新界面，
+  /// 不用等整批跑完 —— 十几条线路的台，等全部探完用户早等不及了。
+  static Future<List<bool>> probeAll(
+    List<String> urls, {
+    void Function(int index, bool alive)? onResult,
+  }) async {
     final results = List<bool>.filled(urls.length, false);
     if (urls.isEmpty) return results;
 
@@ -121,17 +128,10 @@ class IptvProbe {
       ]);
       for (var i = 0; i < batch.length; i++) {
         results[start + i] = batch[i];
+        onResult?.call(start + i, batch[i]);
       }
     }
     return results;
-  }
-
-  /// 第一条可用线路的下标，全都不可用返回 -1
-  static int firstAlive(List<bool> results) {
-    for (var i = 0; i < results.length; i++) {
-      if (results[i]) return i;
-    }
-    return -1;
   }
 
   /// 播放器报错时调用

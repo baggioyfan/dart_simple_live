@@ -434,25 +434,42 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     mediaErrorRetryCount = 0;
     _switchLineTimer?.cancel();
     _switchLineTimer = null;
+    lineAlive
+      ..clear()
+      ..addAll(List<bool?>.filled(playUrl.urls.length, null));
+    _reportedAllDead = false;
+    _notifiedProbing = false;
     initPlaylist();
 
-    // 自定义源：一边播一边探。探到当前线路是死的就立刻跳走，
-    // 不用等播放器自己超时 —— 域名黑洞时它能干等几十秒。
+    // 自定义源：开播的同时就探，探到哪条能用就以哪条为准。
+    // 不延迟 —— 一延迟播放器的错误级联就先把线路盲跳完了。
     if (site.id == Constant.kIptv) {
       unawaited(probePlayLines());
     }
   }
 
-  /// 探测结果只用于「跳线」，不做线路排序
+  /// 每条线路的探测结果，下标与 [playUrls] 一一对应
   ///
-  /// 顺序保持 m3u 里的原样：用户看到的「线路 1/2/3」和源文件对得上，
-  /// 手动切换时也不至于莫名其妙换了条路。要跳线只在探测确认当前这条不通、
-  /// 且播放器还没出声时才做 —— 探测本身会误判（源站限流、瞬时抖动），
-  /// 已经播上的画面不能被它打断。
+  /// null = 还没探到，true = 能拿到播放列表，false = 探不通或实际播挂了。
+  /// 界面上的线路面板直接读这个，用户能看见哪条能用哪条不能用。
+  final RxList<bool?> lineAlive = RxList<bool?>();
+
+  bool? lineAliveAt(int index) =>
+      index >= 0 && index < lineAlive.length ? lineAlive[index] : null;
+
   int _probeToken = 0;
 
   /// 页面已关闭，探测回调不要再动播放器
   bool _disposed = false;
+
+  /// 探测进行中
+  bool _probingLines = false;
+
+  /// 「全部线路不可用」只提示一次，别每切一次线路都弹
+  bool _reportedAllDead = false;
+
+  /// 等探测结果时提示过一次
+  bool _notifiedProbing = false;
 
   Future<void> probePlayLines() async {
     final token = ++_probeToken;
@@ -460,27 +477,69 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     // 只有一条线路时探了也没得换，省下这几秒
     if (urls.length < 2) return;
 
-    // 先让播放器跑一会儿：能播就不用探了，探测的连接也省下来
-    // —— 有些源限制并发连接，探测本身可能把播放挤掉。
-    await Future.delayed(const Duration(milliseconds: 1200));
+    _probingLines = true;
+    try {
+      await IptvProbe.probeAll(
+        urls,
+        onResult: (index, alive) {
+          if (_disposed || token != _probeToken) return;
+          if (index >= lineAlive.length) return;
+          // 已经标成不可用的就别翻案：那条可能是播放器实际播挂的，
+          // 比探测结论更可信
+          if (lineAlive[index] == false) return;
+          lineAlive[index] = alive;
+        },
+      );
+    } finally {
+      if (token == _probeToken) _probingLines = false;
+    }
     if (_disposed || token != _probeToken) return;
-    if (player.state.playing) return;
+    _decideLine();
+  }
 
-    final results = await IptvProbe.probeAll(urls);
-    if (_disposed || token != _probeToken) return;
-    // 已经播起来了就别动
-    if (player.state.playing) return;
-    if (currentLineIndex < 0 || currentLineIndex >= results.length) return;
-    // 当前线路探得通，什么都不用做
-    if (results[currentLineIndex]) return;
+  /// 按探测结果决定播哪条
+  ///
+  /// 这是自定义源换线的唯一依据：不按顺序盲试，只往探得通的线路跳。
+  /// [force] 用于「这条刚刚确实播挂了」的场景 —— 那时播放器状态可能还没
+  /// 来得及翻成未播放，不能因为它在 playing 就不处理。
+  void _decideLine({bool force = false}) {
+    if (playUrls.isEmpty) return;
+    // 已经在出声了就不打扰 —— 探测本身会误判（源站限流、瞬时抖动），
+    // 已经播上的画面不能被它打断。
+    if (!force && player.state.playing) return;
 
-    final alive = IptvProbe.firstAlive(results);
-    if (alive < 0) {
-      SmartDialog.showToast("所有线路均无响应，源可能已失效");
+    final current = currentLineIndex;
+    if (current >= 0 && lineAliveAt(current) == true) return;
+
+    final alive = lineAlive.indexOf(true);
+    if (alive >= 0) {
+      if (alive != current) {
+        Log.d("跳到探测可用的线路${alive + 1}");
+        changePlayLine(alive);
+      }
       return;
     }
-    Log.d("线路${currentLineIndex + 1}探测不通，跳到线路${alive + 1}");
-    changePlayLine(alive);
+
+    final total = lineAlive.length;
+    if (total > 0 && lineAlive.every((state) => state == false)) {
+      if (_reportedAllDead) return;
+      _reportedAllDead = true;
+      SmartDialog.showToast(
+        total == 1 ? "该线路不可用" : "该频道 $total 条线路均不可用",
+      );
+    }
+  }
+
+  /// 当前线路实际播挂了
+  ///
+  /// 探测说能用不代表真能播（分片地址失效、鉴权过期都会走到这里），
+  /// 所以以实际结果覆盖探测结论，再重新挑一条。
+  void _failCurrentLine() {
+    final current = currentLineIndex;
+    if (current >= 0 && current < lineAlive.length) {
+      lineAlive[current] = false;
+    }
+    _decideLine(force: true);
   }
 
   /// 播放一个外部地址（IPTV 回看用）
@@ -492,6 +551,8 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     playUrls.value = [value];
     // 回看地址是现拼的，没有线路名
     playUrlLabels.clear();
+    // 回看地址是现拼的，没有线路可用性可言
+    lineAlive.clear();
     currentLineIndex = 0;
     currentLineInfo.value = lineLabel(currentLineIndex);
     mediaErrorRetryCount = 0;
@@ -522,21 +583,36 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     setPlayer();
   }
 
-  /// 换线防抖
+  /// 换线
   ///
-  /// libmpv 一次打开失败往往会连着抛好几条错误日志。逐条处理的话，
-  /// 几条错误会把后面的线路一口气跳光 —— 明明线路 2 是好的，
-  /// 用户看到的却是「播放失败」。
+  /// 自定义源走「探测驱动」：探测没结束就等着，结束后只跳探得通的线路。
+  /// 盲跳是之前最大的浪费 —— 一个台 17 条线路全挂时，用户得看着它一条条
+  /// 试过去，十几秒才停。现在一次探测就能判定「全不可用」。
   ///
-  /// 所以同一批错误只合并成一次换线，延迟 250ms 执行。这个延迟相对
-  /// 播放器自己的超时（几十秒）可以忽略，换来的是不会误跳线路。
+  /// 其它平台还是原来的顺序换线，只加 250ms 防抖：libmpv 一次打开失败
+  /// 会连抛好几条错误，逐条处理会把后面的线路一口气跳光。
   Timer? _switchLineTimer;
 
   void _scheduleSwitchLine() {
     if (_switchLineTimer?.isActive ?? false) return;
+
+    final isIptv = site.id == Constant.kIptv && lineAlive.isNotEmpty;
+    if (isIptv && _probingLines) {
+      // 探测还在跑，等它出结果再决定跳哪条
+      if (!_notifiedProbing) {
+        _notifiedProbing = true;
+        SmartDialog.showToast("正在检测可用线路…");
+      }
+      return;
+    }
+
     _switchLineTimer = Timer(const Duration(milliseconds: 250), () {
       _switchLineTimer = null;
       if (_disposed) return;
+      if (isIptv) {
+        _failCurrentLine();
+        return;
+      }
       if (playUrls.length - 1 == currentLineIndex) return;
       changePlayLine(currentLineIndex + 1);
     });
@@ -625,6 +701,14 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       mediaErrorRetryCount += 1;
       //刷新一次
       setPlayer();
+      return;
+    }
+
+    // 自定义源交给探测结果决定：跳哪条、以及是不是全都不可用。
+    // 不在这里提示「播放失败」，因为单条线路报错说明不了整体状况 ——
+    // 17 条线路里挂掉 16 条也得先把能用的那条找出来。
+    if (site.id == Constant.kIptv && lineAlive.isNotEmpty) {
+      _scheduleSwitchLine();
       return;
     }
 
@@ -822,29 +906,55 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   void showPlayUrlsSheet() {
     Utils.showBottomSheet(
       title: "切换线路",
-      child: RadioGroup(
-        groupValue: currentLineIndex,
-        onChanged: (e) {
-          Get.back();
-          //currentLineIndex = i;
-          //setPlayer();
-          changePlayLine(e ?? 0);
-        },
-        child: ListView.builder(
-          itemCount: playUrls.length,
-          itemBuilder: (_, i) {
-            return RadioListTile(
-              value: i,
-              title: Text(
-                lineLabel(i),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              secondary: Text(
-                playUrls[i].contains(".flv") ? "FLV" : "HLS",
-              ),
-            );
+      // Obx 是为了让探测结果能实时反映到面板上：线路多的时候探测要跑
+      // 好几秒，面板先开出来、颜色后到，比一直转圈强
+      child: Obx(
+        () => RadioGroup(
+          groupValue: currentLineIndex,
+          onChanged: (e) {
+            Get.back();
+            //currentLineIndex = i;
+            //setPlayer();
+            changePlayLine(e ?? 0);
           },
+          child: ListView.builder(
+            itemCount: playUrls.length,
+            itemBuilder: (_, i) {
+              final state = lineAliveAt(i);
+              return RadioListTile(
+                value: i,
+                title: Text(
+                  lineLabel(i),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: state == false
+                      ? TextStyle(color: Colors.grey.withAlpha(160))
+                      : null,
+                ),
+                secondary: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (state != null) ...[
+                      Container(
+                        width: 7,
+                        height: 7,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color:
+                              state ? Colors.green : Colors.grey.withAlpha(120),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    Text(
+                      playUrls[i].contains(".flv") ? "FLV" : "HLS",
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
         ),
       ),
     );

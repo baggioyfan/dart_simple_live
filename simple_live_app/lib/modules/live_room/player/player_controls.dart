@@ -699,49 +699,74 @@ void showLinesInfo(LiveRoomController controller) {
   Utils.showRightDialog(
     title: "线路",
     useSystem: true,
-    child: ListView.builder(
-      padding: EdgeInsets.zero,
-      itemCount: controller.playUrls.length,
-      itemBuilder: (_, i) {
-        return ListTile(
-          selected: controller.currentLineIndex == i,
-          title: Text.rich(
-            TextSpan(
-              // 自定义源会给出域名（「cdn1.example.com」），其它平台退回「线路N」
-              text: controller.lineLabel(i),
-              children: [
-                WidgetSpan(
-                    child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: AppStyle.radius4,
-                    border: Border.all(
-                      color: Colors.grey,
+    // 包一层 Obx：探测结果是边探边回填的，面板打开后才探出来的线路
+    // 也得跟着变色，否则用户看到的永远是「还不知道」
+    child: Obx(
+      () => ListView.builder(
+        padding: EdgeInsets.zero,
+        itemCount: controller.playUrls.length,
+        itemBuilder: (_, i) {
+          final state = controller.lineAliveAt(i);
+          return ListTile(
+            selected: controller.currentLineIndex == i,
+            title: Text.rich(
+              TextSpan(
+                children: [
+                  if (state != null)
+                    WidgetSpan(
+                      alignment: PlaceholderAlignment.middle,
+                      child: Container(
+                        width: 7,
+                        height: 7,
+                        margin: const EdgeInsets.only(right: 6),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color:
+                              state ? Colors.green : Colors.grey.withAlpha(120),
+                        ),
+                      ),
                     ),
+                  TextSpan(
+                    // 自定义源会给出域名（「cdn1.example.com」），
+                    // 其它平台退回「线路N」
+                    text: controller.lineLabel(i),
+                    style: state == false
+                        ? TextStyle(color: Colors.grey.withAlpha(160))
+                        : null,
                   ),
-                  padding: AppStyle.edgeInsetsH4,
-                  margin: AppStyle.edgeInsetsL8,
-                  child: Text(
-                    controller.playUrls[i].contains(".flv") ? "FLV" : "HLS",
-                    style: const TextStyle(
-                      fontSize: 12,
+                  WidgetSpan(
+                      child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: AppStyle.radius4,
+                      border: Border.all(
+                        color: Colors.grey,
+                      ),
                     ),
-                  ),
-                )),
-              ],
+                    padding: AppStyle.edgeInsetsH4,
+                    margin: AppStyle.edgeInsetsL8,
+                    child: Text(
+                      controller.playUrls[i].contains(".flv") ? "FLV" : "HLS",
+                      style: const TextStyle(
+                        fontSize: 12,
+                      ),
+                    ),
+                  )),
+                ],
+              ),
+              style: const TextStyle(fontSize: 14),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
-            style: const TextStyle(fontSize: 14),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          minLeadingWidth: 16,
-          onTap: () {
-            Utils.hideRightDialog();
-            //controller.currentLineIndex = i;
-            //controller.setPlayer();
-            controller.changePlayLine(i);
-          },
-        );
-      },
+            minLeadingWidth: 16,
+            onTap: () {
+              Utils.hideRightDialog();
+              //controller.currentLineIndex = i;
+              //controller.setPlayer();
+              controller.changePlayLine(i);
+            },
+          );
+        },
+      ),
     ),
   );
 }
