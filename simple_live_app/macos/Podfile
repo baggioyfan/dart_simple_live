@@ -40,10 +40,10 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_macos_build_settings(target)
 
-    # CI 要出单架构包时，让 Pods 也只编这一份。
-    # 不设的话每个 pod 框架都会带 arm64 + x86_64 两个 slice 一起塞进 .app，
-    # 只有 vendored 的 xcframework（libmpv）会自动按目标架构切。
-    # 本地构建不导出这个变量，行为不变。
+    # 可选：只编单一架构时设置这个变量，Pods 也会跟着只编一份。
+    # 现在 CI 出的是 universal 包，不设它 —— 不设就走 ARCHS_STANDARD
+    # （arm64 + x86_64），pods 自然是双架构。
+    # 以后若想恢复「按架构拆包」，在 job 级导出 CI_MACOS_ARCH 即可。
     arch = ENV['CI_MACOS_ARCH'].to_s.strip
     next if arch.empty?
 

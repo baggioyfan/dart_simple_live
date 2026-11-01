@@ -22,24 +22,6 @@ on:
 run-name: ${{ github.event_name == 'push' && github.ref_name || (inputs.tag != '' && format('发布 {0}', inputs.tag) || '手动构建（仅 Artifacts）') }}
 
 jobs:
-  # macOS 要按架构拆成两个 job，而 matrix 是静态的、job 级 if 又拿不到 matrix
-  # 上下文，所以先用一个极轻的 job 把「这次编哪些架构」算成 JSON。
-  plan:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      matrix: ${{ steps.set.outputs.matrix }}
-    steps:
-      - name: Resolve the macOS architecture matrix
-        id: set
-        run: |
-          # 两个架构都出，各自独立包。arm64 → macos-15（Apple Silicon 原生），
-          # x86_64 → macos-15-intel（GitHub 唯一的免费 x86_64 macOS runner）。
-          arm64_leg='{"arch":"arm64","runner":"macos-15","artifact":"macos-arm64"}'
-          x64_leg='{"arch":"x86_64","runner":"macos-15-intel","artifact":"macos-x86_64"}'
-          printf 'matrix={"include":[%s,%s]}\n' "$arm64_leg" "$x64_leg" >> "$GITHUB_OUTPUT"
-          printf '本次 macOS 构建：arm64 + x86_64\n' >> "$GITHUB_STEP_SUMMARY"
-
   # Android 单独跑在 ubuntu 上。
   #
   # 原来它和 iOS 挤在同一个 macos-latest job 里，结果是 v1.12.0 那次 arm64
@@ -165,7 +147,7 @@ jobs:
 
   # 汇总 Android（以及将来恢复后的 iOS）再发 Release。分两步而不是直接让
   # build-android 自己发，是为了留一个统一的出口：
-  #   1. 多个 job 同时往同一个 release 传文件会打架（matrix 里踩过这个坑）；
+  #   1. 多个 job 同时往同一个 release 传文件会打架；
   #   2. 用 !cancelled() 而不是默认的「needs 全成功」，某个平台挂了不影响别的。
   publish-mobile:
     needs: build-android
@@ -215,20 +197,15 @@ jobs:
       #完成
       - run: echo "🍏 This job's status is ${{ job.status }}."
 
-  # 打包 macOS：按架构拆成两个 job，各自在原生 runner 上编，每个包只含单一架构。
-  # 不拆的话 `flutter build macos` 会按 ARCHS_STANDARD 出 universal 包，
-  # libmpv 的 arm64 + x86_64 两份 slice 都会链进去（zip 22MB → 42MB）。
+  # 打包 macOS：一个 universal 包（arm64 + x86_64）。
+  #
+  # 曾经按架构拆成两个 job 各自出单架构包（zip 20.4MB / 21.6MB），好处是
+  # 每个用户只下自己那份，坏处是发布页两个文件得自己挑，还要占两次
+  # macOS runner 配额。现在改回 universal：在 arm64 runner 上交叉编 x86_64，
+  # 一次出包，体积约 42MB —— 两个 slice 的机器码不共享，只有资源去重。
   build-macos:
-    needs: plan
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
-    env:
-      # 整 job 生效：macos/Podfile 的 post_install 读它，让 Pods 也只编目标架构。
-      # pod install 可能在 pub get / build 任意一步被触发，放 job 级最稳。
-      CI_MACOS_ARCH: ${{ matrix.arch }}
+    runs-on: macos-15
+    timeout-minutes: 150
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -244,7 +221,7 @@ jobs:
 
       - name: Show runner info
         run: |
-          echo "target arch: ${{ matrix.arch }}"
+          echo "target arch: arm64 + x86_64 (universal)"
           uname -m
           sw_vers
           xcodebuild -version
@@ -273,17 +250,16 @@ jobs:
         run: |
           cd simple_live_app
           flutter pub get
-          echo "CI_MACOS_ARCH=$CI_MACOS_ARCH"
 
-      - name: Force single-arch build settings
-        # flutter_distributor 内部就是 `flutter build macos --release`，而它没有
-        # 架构开关，只会按 ARCHS_STANDARD 出包。追加到 Release.xcconfig 末尾：
-        # xcconfig 后写的覆盖前面 include 进来的值。
-        env:
-          ARCH: ${{ matrix.arch }}
+      - name: Force universal build settings
+        # flutter_distributor 内部就是 `flutter build macos --release`，没有架构开关。
+        # 追加到 Release.xcconfig 末尾（xcconfig 后写的覆盖前面 include 的值）：
+        #   - ARCHS 钉死双架构，不依赖 ARCHS_STANDARD 在不同 Xcode 版本下的取值；
+        #   - ONLY_ACTIVE_ARCH=NO 才是关键。runner 本身是 arm64，这一项若是 YES，
+        #     只会编出 arm64，最后得到一个「看着像 universal 其实只有一份」的包。
         run: |
           cd simple_live_app
-          printf '\n// CI: 本次只出 %s\nARCHS = %s\n' "$ARCH" "$ARCH" \
+          printf '\n// CI: universal（arm64 + x86_64）\nARCHS = arm64 x86_64\nONLY_ACTIVE_ARCH = NO\n' \
             >> macos/Runner/Configs/Release.xcconfig
           cat macos/Runner/Configs/Release.xcconfig
 
@@ -298,11 +274,11 @@ jobs:
           flutter_distributor package --platform macos --targets zip
 
       - name: Verify architecture
-        # 必须硬失败：宿主与目标同架构时最容易静默出成 universal，那就等于白拆。
+        # 必须硬失败：在 arm64 runner 上交叉编，最怕 ONLY_ACTIVE_ARCH 或某个 pod
+        # 只出了单架构，产出一个「看着像 universal 其实只有 arm64」的包 ——
+        # 在 Intel 机器上打开就是一句「应用已损坏」，用户根本不知道原因。
         # 第三方预编译产物（libmpv 等）缺 slice 的症状是运行到播放页才崩，
         # 构建期先抓出来更省事。
-        env:
-          WANT: ${{ matrix.arch }}
         run: |
           cd simple_live_app
           APP=$(ls -d build/macos/Build/Products/Release/*.app 2>/dev/null | head -1)
@@ -322,19 +298,21 @@ jobs:
           }
           bad=0
           check() {
-            local f="$1" got
+            local f="$1" got want
             case "$(file -b "$f" 2>/dev/null)" in
               *Mach-O*) ;;
               *) return 0 ;;
             esac
             got="$(norm "$(lipo -archs "$f" 2>/dev/null || true)")"
-            case " $got " in
-              *" $WANT "*) ;;
-              *)
-                echo "::error file=$f::架构为「${got:-未知}」，缺少 $WANT"
-                bad=1
-                ;;
-            esac
+            for want in arm64 x86_64; do
+              case " $got " in
+                *" $want "*) ;;
+                *)
+                  echo "::error file=$f::架构为「${got:-未知}」，缺少 $want"
+                  bad=1
+                  ;;
+              esac
+            done
           }
           check "$BIN"
           # 只扫 MacOS 与 Frameworks：flutter_assets 里上万个资源不是 Mach-O
@@ -342,12 +320,10 @@ jobs:
             [ -d "$root" ] || continue
             while IFS= read -r f; do check "$f"; done < <(find "$root" -type f)
           done
-          [ "$bad" -eq 0 ] || { echo "::error::包内存在缺少 $WANT slice 的 Mach-O"; exit 1; }
-          echo "包内全部 Mach-O 均含 $WANT"
+          [ "$bad" -eq 0 ] || { echo "::error::包内存在缺少 arm64 / x86_64 slice 的 Mach-O"; exit 1; }
+          echo "包内全部 Mach-O 均为 universal"
 
       - name: Collect artifacts
-        env:
-          ARCH: ${{ matrix.arch }}
         run: |
           cd simple_live_app
           mkdir -p dist
@@ -356,25 +332,26 @@ jobs:
             base=$(basename "$f")
             stem="${base%.*}"
             ext="${base##*.}"
-            # 两个架构的产物同名，必须带架构后缀，否则用户分不清
-            cp "$f" "dist/${stem}-${ARCH}.${ext}"
+            # 只有一个包，把架构标进文件名，一眼看出是通用包
+            cp "$f" "dist/${stem}-universal.${ext}"
           done
           ls -lh dist
 
       - name: Upload macOS to Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
+          name: macos-universal
           if-no-files-found: error
           retention-days: 14
           path: simple_live_app/dist/*
 
-  # 单独一个 job 往 Release 传 macOS：matrix 两个 leg 同时创建同一个 release 会打架
+  # 单独一个 job 往 Release 传 macOS，和 publish-mobile 一样留个统一出口：
+  # 多个 job 同时往同一个 release 传文件会打架，而 macOS 这里即使只有一个
+  # 产物，分开发也和 Android / Windows 互不干扰。
   publish-macos:
     needs: build-macos
-    # 默认行为是「needs 全部成功才跑」，于是 arm64 抢不到 runner 被取消时，
-    # 已经编好的 x86_64 也跟着发不出去。改成 !cancelled() 让两个架构各自算数。
-    # 手动触发没填 tag 时同样跳过，产物留在 Artifacts。
+    # 默认行为是「needs 全部成功才跑」，改 !cancelled() 是为了让构建失败时
+    # 已经产出的东西不至于全丢。手动触发没填 tag 时跳过，产物留在 Artifacts。
     if: ${{ !cancelled() && (github.event_name == 'push' || inputs.tag != '') }}
     runs-on: ubuntu-24.04
     permissions:
@@ -383,7 +360,7 @@ jobs:
       - name: Download macOS artifacts
         uses: actions/download-artifact@v4
         with:
-          # 不加 pattern 会把 android / ios / linux / windows 的产物一起拖下来，
+          # 不加 pattern 会把 android / windows 的产物一起拖下来，
           # 然后一并塞进 release —— 既慢又可能和别的 job 抢同一个文件。
           pattern: macos-*
           path: dist
@@ -402,7 +379,7 @@ jobs:
           fi
 
       - name: Upload macOS to Release
-        # 两个架构都没编出来就跳过，别让 action 去匹配空目录
+        # 没编出产物就跳过，别让 action 去匹配空目录
         if: ${{ hashFiles('dist/*') != '' }}
         uses: softprops/action-gh-release@v2
         with:
