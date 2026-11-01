@@ -217,12 +217,8 @@ class IptvSourcePage extends GetView<IptvSourceController> {
             child: Text(source.enabled ? "停用" : "启用"),
           ),
           const PopupMenuItem(
-            value: "rename",
-            child: Text("重命名"),
-          ),
-          const PopupMenuItem(
-            value: "editUrl",
-            child: Text("修改播放列表地址"),
+            value: "edit",
+            child: Text("编辑地址与名称"),
           ),
           const PopupMenuItem(
             value: "delete",
@@ -262,16 +258,14 @@ class IptvSourcePage extends GetView<IptvSourceController> {
       case "toggle":
         await controller.toggleEnabled(source);
         break;
-      case "rename":
-        final name = await _showRenameDialog(context, source.name);
-        if (name != null) {
-          await controller.rename(source, name);
-        }
-        break;
-      case "editUrl":
-        final url = await _showEditUrlDialog(context, source.url);
-        if (url != null) {
-          await controller.updateSourceUrl(source, url);
+      case "edit":
+        final result = await _showEditDialog(context, source);
+        if (result != null) {
+          await controller.editSource(
+            source,
+            url: result.url,
+            name: result.name,
+          );
         }
         break;
       case "delete":
@@ -292,52 +286,20 @@ class IptvSourcePage extends GetView<IptvSourceController> {
     await controller.importSource(url: result.url, name: result.name);
   }
 
-  /// 重命名
-  Future<String?> _showRenameDialog(BuildContext context, String current) async {
-    final textController = TextEditingController(text: current);
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("重命名"),
-        content: TextField(
-          controller: textController,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: "名称",
-            hintText: "例如 家里 IPTV",
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text("取消"),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(textController.text.trim()),
-            child: const Text("保存"),
-          ),
-        ],
-      ),
-    );
-    textController.dispose();
-    return (result == null || result.isEmpty) ? null : result;
-  }
-
-  /// 修改播放列表地址（名称不动，走「重命名」）
-  Future<String?> _showEditUrlDialog(
+  /// 编辑名称与地址
+  Future<_SourceFormResult?> _showEditDialog(
     BuildContext context,
-    String current,
-  ) async {
-    final result = await showDialog<_SourceFormResult>(
+    IptvSource source,
+  ) {
+    return showDialog<_SourceFormResult>(
       context: context,
       builder: (_) => _SourceFormDialog(
-        initialUrl: current,
-        title: "修改播放列表地址",
+        initialUrl: source.url,
+        initialName: source.name,
+        title: "编辑直播源",
         confirmText: "保存",
-        showNameField: false,
       ),
     );
-    return result?.url;
   }
 
   Future<bool> _confirmDelete(BuildContext context, String name) async {
@@ -374,7 +336,6 @@ class _SourceFormDialog extends StatefulWidget {
     this.initialName = '',
     this.title = '添加直播源',
     this.confirmText = '导入',
-    this.showNameField = true,
   });
 
   /// 编辑时预填当前值；新增时都是空
@@ -382,9 +343,6 @@ class _SourceFormDialog extends StatefulWidget {
   final String initialName;
   final String title;
   final String confirmText;
-
-  /// 只改地址时不需要名称字段
-  final bool showNameField;
 
   @override
   State<_SourceFormDialog> createState() => _SourceFormDialogState();
@@ -419,16 +377,14 @@ class _SourceFormDialogState extends State<_SourceFormDialog> {
               hintText: "http://example.com/playlist.m3u",
             ),
           ),
-          if (widget.showNameField) ...[
-            const SizedBox(height: 8),
-            TextField(
-              controller: nameController,
-              decoration: const InputDecoration(
-                labelText: "名称（可选）",
-                hintText: "留空则自动取地址末段",
-              ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: nameController,
+            decoration: const InputDecoration(
+              labelText: "名称（可选）",
+              hintText: "留空则自动取地址末段",
             ),
-          ],
+          ),
         ],
       ),
       actions: [

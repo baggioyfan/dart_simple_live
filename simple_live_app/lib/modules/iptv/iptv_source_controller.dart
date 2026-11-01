@@ -140,19 +140,18 @@ class IptvSourceController extends GetxController {
   /// 地址变了必须重新拉一次播放列表，否则频道还是旧地址下的。
   /// 新地址拉不动就回滚 —— 不然源会停在「地址是新的、频道是旧的」这种
   /// 半坏状态，用户看着像是更新成功了其实什么都没变。
-  Future<void> updateSourceUrl(IptvSource source, String url) async {
-    if (busy.value) return;
+  ///
+  /// 返回是否真的换了地址。
+  Future<bool> updateSourceUrl(IptvSource source, String url) async {
+    if (busy.value) return false;
     final newUrl = url.trim();
     if (newUrl.isEmpty) {
       SmartDialog.showToast("请填写播放列表地址");
-      return;
+      return false;
     }
 
     final oldUrl = source.url;
-    if (newUrl == oldUrl.trim()) {
-      SmartDialog.showToast("地址没有变化");
-      return;
-    }
+    if (newUrl == oldUrl.trim()) return false;
 
     source.url = newUrl;
     await _service.updateSource(source);
@@ -170,15 +169,52 @@ class IptvSourceController extends GetxController {
             ? "地址已更新，$count 个频道（合并 $merged 条重复线路）"
             : "地址已更新，$count 个频道",
       );
+      return true;
     } catch (e) {
       Log.logPrint(e);
       source.url = oldUrl;
       await _service.updateSource(source);
       reload();
       SmartDialog.showToast("新地址不可用：${_message(e)}");
+      return false;
     } finally {
       SmartDialog.dismiss(status: SmartStatus.loading);
       busy.value = false;
+    }
+  }
+
+  /// 修改源的名称和地址（同一个入口）
+  ///
+  /// 先改地址再改名：地址那步可能失败，失败就整体不动，避免出现
+  /// 「名字改了、地址还是旧的」这种半截状态。
+  Future<void> editSource(
+    IptvSource source, {
+    required String url,
+    required String name,
+  }) async {
+    if (busy.value) return;
+
+    final newUrl = url.trim();
+    final newName = name.trim();
+    if (newUrl.isEmpty) {
+      SmartDialog.showToast("请填写播放列表地址");
+      return;
+    }
+
+    final urlChanged = newUrl != source.url.trim();
+    final nameChanged = newName.isNotEmpty && newName != source.name;
+
+    if (!urlChanged && !nameChanged) {
+      SmartDialog.showToast("没有变化");
+      return;
+    }
+
+    if (urlChanged) {
+      final ok = await updateSourceUrl(source, newUrl);
+      if (!ok) return;
+    }
+    if (nameChanged) {
+      await rename(source, newName);
     }
   }
 
