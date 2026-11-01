@@ -217,8 +217,8 @@ class IptvSourcePage extends GetView<IptvSourceController> {
             child: Text(source.enabled ? "停用" : "启用"),
           ),
           const PopupMenuItem(
-            value: "rename",
-            child: Text("重命名"),
+            value: "edit",
+            child: Text("编辑地址与名称"),
           ),
           const PopupMenuItem(
             value: "delete",
@@ -258,10 +258,14 @@ class IptvSourcePage extends GetView<IptvSourceController> {
       case "toggle":
         await controller.toggleEnabled(source);
         break;
-      case "rename":
-        final name = await _showRenameDialog(context, source.name);
-        if (name != null) {
-          await controller.rename(source, name);
+      case "edit":
+        final result = await _showEditDialog(context, source);
+        if (result != null) {
+          await controller.editSource(
+            source,
+            url: result.url,
+            name: result.name,
+          );
         }
         break;
       case "delete":
@@ -274,43 +278,27 @@ class IptvSourcePage extends GetView<IptvSourceController> {
   }
 
   Future<void> _showAddDialog(BuildContext context) async {
-    final result = await showDialog<_AddSourceResult>(
+    final result = await showDialog<_SourceFormResult>(
       context: context,
-      builder: (_) => const _AddSourceDialog(),
+      builder: (_) => const _SourceFormDialog(),
     );
     if (result == null) return;
     await controller.importSource(url: result.url, name: result.name);
   }
 
-  Future<String?> _showRenameDialog(BuildContext context, String current) async {
-    final textController = TextEditingController(text: current);
-    final result = await showDialog<String>(
+  Future<_SourceFormResult?> _showEditDialog(
+    BuildContext context,
+    IptvSource source,
+  ) {
+    return showDialog<_SourceFormResult>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("重命名"),
-        content: TextField(
-          controller: textController,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: "名称",
-            hintText: "例如 家里 IPTV",
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text("取消"),
-          ),
-          TextButton(
-            onPressed: () =>
-                Navigator.of(ctx).pop(textController.text.trim()),
-            child: const Text("保存"),
-          ),
-        ],
+      builder: (_) => _SourceFormDialog(
+        initialUrl: source.url,
+        initialName: source.name,
+        title: "编辑直播源",
+        confirmText: "保存",
       ),
     );
-    textController.dispose();
-    return (result == null || result.isEmpty) ? null : result;
   }
 
   Future<bool> _confirmDelete(BuildContext context, String name) async {
@@ -335,22 +323,35 @@ class IptvSourcePage extends GetView<IptvSourceController> {
   }
 }
 
-class _AddSourceResult {
-  _AddSourceResult(this.url, this.name);
+class _SourceFormResult {
+  _SourceFormResult(this.url, this.name);
   final String url;
   final String name;
 }
 
-class _AddSourceDialog extends StatefulWidget {
-  const _AddSourceDialog();
+class _SourceFormDialog extends StatefulWidget {
+  const _SourceFormDialog({
+    this.initialUrl = '',
+    this.initialName = '',
+    this.title = '添加直播源',
+    this.confirmText = '导入',
+  });
+
+  /// 编辑时预填当前值；新增时都是空
+  final String initialUrl;
+  final String initialName;
+  final String title;
+  final String confirmText;
 
   @override
-  State<_AddSourceDialog> createState() => _AddSourceDialogState();
+  State<_SourceFormDialog> createState() => _SourceFormDialogState();
 }
 
-class _AddSourceDialogState extends State<_AddSourceDialog> {
-  final TextEditingController urlController = TextEditingController();
-  final TextEditingController nameController = TextEditingController();
+class _SourceFormDialogState extends State<_SourceFormDialog> {
+  late final TextEditingController urlController =
+      TextEditingController(text: widget.initialUrl);
+  late final TextEditingController nameController =
+      TextEditingController(text: widget.initialName);
 
   @override
   void dispose() {
@@ -362,7 +363,7 @@ class _AddSourceDialogState extends State<_AddSourceDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text("添加直播源"),
+      title: Text(widget.title),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -395,10 +396,10 @@ class _AddSourceDialogState extends State<_AddSourceDialog> {
             final url = urlController.text.trim();
             if (url.isEmpty) return;
             Navigator.of(context).pop(
-              _AddSourceResult(url, nameController.text.trim()),
+              _SourceFormResult(url, nameController.text.trim()),
             );
           },
-          child: const Text("导入"),
+          child: Text(widget.confirmText),
         ),
       ],
     );
