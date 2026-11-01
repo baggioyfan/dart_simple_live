@@ -123,16 +123,24 @@ class IptvSourceController extends GetxController {
     _reloadLiveTabs();
   }
 
-  /// 修改源的地址和名称
+  /// 修改源名称
+  ///
+  /// 分类页一级标题就是源名，改完要通知首页/分类页重建 tab。
+  Future<void> rename(IptvSource source, String name) async {
+    final value = name.trim();
+    if (value.isEmpty) return;
+    source.name = value;
+    await _service.updateSource(source);
+    reload();
+    _reloadLiveTabs();
+  }
+
+  /// 修改播放列表地址
   ///
   /// 地址变了必须重新拉一次播放列表，否则频道还是旧地址下的。
-  /// 新地址拉不动就整体回滚 —— 不然源会停在「地址是新的、频道是旧的」
-  /// 这种半坏状态，用户看着像是更新成功了其实什么都没变。
-  Future<void> editSource(
-    IptvSource source, {
-    required String url,
-    required String name,
-  }) async {
+  /// 新地址拉不动就回滚 —— 不然源会停在「地址是新的、频道是旧的」这种
+  /// 半坏状态，用户看着像是更新成功了其实什么都没变。
+  Future<void> updateSourceUrl(IptvSource source, String url) async {
     if (busy.value) return;
     final newUrl = url.trim();
     if (newUrl.isEmpty) {
@@ -141,21 +149,14 @@ class IptvSourceController extends GetxController {
     }
 
     final oldUrl = source.url;
-    final oldName = source.name;
-    final newName = name.trim();
-    final urlChanged = newUrl != oldUrl.trim();
-
-    source.url = newUrl;
-    if (newName.isNotEmpty) source.name = newName;
-    await _service.updateSource(source);
-    reload();
-
-    // 只改了名字，没必要重拉一遍播放列表
-    if (!urlChanged) {
-      _reloadLiveTabs();
-      SmartDialog.showToast("已保存");
+    if (newUrl == oldUrl.trim()) {
+      SmartDialog.showToast("地址没有变化");
       return;
     }
+
+    source.url = newUrl;
+    await _service.updateSource(source);
+    reload();
 
     busy.value = true;
     SmartDialog.showLoading(msg: "正在拉取新的播放列表");
@@ -172,7 +173,6 @@ class IptvSourceController extends GetxController {
     } catch (e) {
       Log.logPrint(e);
       source.url = oldUrl;
-      source.name = oldName;
       await _service.updateSource(source);
       reload();
       SmartDialog.showToast("新地址不可用：${_message(e)}");
