@@ -432,7 +432,8 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     currentLineInfo.value = lineLabel(currentLineIndex);
     //重置错误次数
     mediaErrorRetryCount = 0;
-    _lastLineSwitchAt = null;
+    _switchLineTimer?.cancel();
+    _switchLineTimer = null;
     initPlaylist();
 
     // 自定义源：一边播一边探。探到当前线路是死的就立刻跳走，
@@ -494,7 +495,8 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     currentLineIndex = 0;
     currentLineInfo.value = lineLabel(currentLineIndex);
     mediaErrorRetryCount = 0;
-    _lastLineSwitchAt = null;
+    _switchLineTimer?.cancel();
+    _switchLineTimer = null;
     liveStatus.value = true;
     initPlaylist();
   }
@@ -512,24 +514,32 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   }
 
   void changePlayLine(int index) {
+    _switchLineTimer?.cancel();
+    _switchLineTimer = null;
     currentLineIndex = index;
     //重置错误次数
     mediaErrorRetryCount = 0;
-    _lastLineSwitchAt = DateTime.now();
     setPlayer();
   }
 
-  /// 上一次换线的时刻
+  /// 换线防抖
   ///
-  /// 自定义源不重试，直接换线，但 libmpv 一次打开失败往往会连着抛好几条
-  /// 错误日志。不设防的话这几条会把后面的线路一口气跳光 —— 明明线路 2
-  /// 是好的，用户看到的却是「播放失败」。这里只认换线后第一条错误。
-  DateTime? _lastLineSwitchAt;
+  /// libmpv 一次打开失败往往会连着抛好几条错误日志。逐条处理的话，
+  /// 几条错误会把后面的线路一口气跳光 —— 明明线路 2 是好的，
+  /// 用户看到的却是「播放失败」。
+  ///
+  /// 所以同一批错误只合并成一次换线，延迟 250ms 执行。这个延迟相对
+  /// 播放器自己的超时（几十秒）可以忽略，换来的是不会误跳线路。
+  Timer? _switchLineTimer;
 
-  bool get _canSwitchLine {
-    final at = _lastLineSwitchAt;
-    if (at == null) return true;
-    return DateTime.now().difference(at) > const Duration(milliseconds: 300);
+  void _scheduleSwitchLine() {
+    if (_switchLineTimer?.isActive ?? false) return;
+    _switchLineTimer = Timer(const Duration(milliseconds: 250), () {
+      _switchLineTimer = null;
+      if (_disposed) return;
+      if (playUrls.length - 1 == currentLineIndex) return;
+      changePlayLine(currentLineIndex + 1);
+    });
   }
 
   void initPlaylist() async {
@@ -588,10 +598,8 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     // 遍历线路，如果全部链接都断开就是直播结束了
     if (playUrls.length - 1 == currentLineIndex) {
       liveStatus.value = false;
-    } else if (_canSwitchLine) {
-      changePlayLine(currentLineIndex + 1);
-
-      //setPlayer();
+    } else {
+      _scheduleSwitchLine();
     }
   }
 
@@ -623,10 +631,8 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     if (playUrls.length - 1 == currentLineIndex) {
       errorMsg.value = "播放失败";
       SmartDialog.showToast("播放失败:$error");
-    } else if (_canSwitchLine) {
-      //currentLineIndex += 1;
-      //setPlayer();
-      changePlayLine(currentLineIndex + 1);
+    } else {
+      _scheduleSwitchLine();
     }
   }
 
@@ -1196,6 +1202,7 @@ ${error?.stackTrace}''');
   void onClose() {
     _disposed = true;
     _probeToken++;
+    _switchLineTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     scrollController.removeListener(scrollListener);
     autoExitTimer?.cancel();
