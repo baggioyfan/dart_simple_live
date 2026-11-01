@@ -512,7 +512,11 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     if (!force && player.state.playing) return;
 
     final current = currentLineIndex;
-    if (current >= 0 && lineAliveAt(current) == true) return;
+    final currentState = current >= 0 ? lineAliveAt(current) : null;
+    if (currentState == true) return;
+    // 当前线路还没探到就别动 —— 用户可能刚手动选了它，
+    // 在拿到它的结果之前抢着换线会显得很莫名其妙
+    if (currentState == null && !force) return;
 
     final alive = lineAlive.indexOf(true);
     if (alive >= 0) {
