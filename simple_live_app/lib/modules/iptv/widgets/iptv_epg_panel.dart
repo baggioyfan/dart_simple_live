@@ -48,6 +48,9 @@ class _IptvEpgPanelState extends State<IptvEpgPanel> {
   bool _loading = true;
   bool _hasEpg = true;
   String? _error;
+
+  /// 最近一次拿到的节目单，用于区分「没取到 EPG」和「EPG 里没这个台」
+  XmltvGuide? _guide;
   DateTime _now = DateTime.now();
   Timer? _ticker;
   bool _located = false;
@@ -117,8 +120,11 @@ class _IptvEpgPanelState extends State<IptvEpgPanel> {
     if (!mounted) return;
 
     _channel = channel;
+    _guide = guide;
     _now = DateTime.now();
-    _hasEpg = guide != null && channel.tvgId.isNotEmpty;
+    // 以前只认 tvg-id，没有 tvg-id 的源（只有 tvg-name）一律当「没有节目单」；
+    // 现在交给 guide 自己去解析，能对上 tvg-name / 台名就算有。
+    _hasEpg = guide != null && guide.hasChannel(channel.epgKey);
     _programmes = _visibleProgrammes(guide);
     _loading = false;
     setState(() {});
@@ -130,10 +136,10 @@ class _IptvEpgPanelState extends State<IptvEpgPanel> {
   List<EpgProgramme> _visibleProgrammes([XmltvGuide? guide]) {
     final channel = _channel;
     final data = guide ?? IptvService.instance.cachedEpg(channel?.sourceId ?? '');
-    if (channel == null || data == null || channel.tvgId.isEmpty) {
+    if (channel == null || data == null) {
       return const [];
     }
-    final all = data.programmesOf(channel.tvgId);
+    final all = data.programmesFor(channel.epgKey);
     if (all.isEmpty) return const [];
     final from = _now.subtract(_lookBack);
     final to = _now.add(_lookAhead);
@@ -258,10 +264,21 @@ class _IptvEpgPanelState extends State<IptvEpgPanel> {
       return _hint(context, Remix.error_warning_line, _error!, canRetry: true);
     }
     if (!_hasEpg) {
+      if (_guide == null) {
+        // 压根没拿到节目单：地址没填、地址失效、或者根本拉不下来
+        return _hint(
+          context,
+          Remix.information_line,
+          "没有取到节目单\n可在直播源设置里检查这个源的 EPG 地址",
+          canRetry: true,
+        );
+      }
+      // 节目单拿到了，但里面没有这个台
       return _hint(
         context,
         Remix.information_line,
-        "这个频道没有节目单\n播放列表里缺少 EPG 地址或 tvg-id",
+        "节目单里没有「${_channel?.name ?? '这个频道'}」\n"
+        "EPG 靠 tvg-id 或台名对照，可在源设置里补上",
       );
     }
     if (_programmes.isEmpty) {

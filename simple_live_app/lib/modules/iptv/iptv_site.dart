@@ -68,7 +68,9 @@ class IptvSite extends LiveSite {
     return LiveCategoryResult(
       hasMore: false,
       items: channels
-          .map((e) => _toRoomItem(e, guide?.currentAt(e.tvgId, now)))
+          // epgKey 会自己从 tvg-id 退到 tvg-name / 台名，
+          // 只写 tvg-name 的源（如 CCSH/IPTV）也能对上节目单
+          .map((e) => _toRoomItem(e, guide?.currentFor(e.epgKey, now)))
           .toList(),
     );
   }
