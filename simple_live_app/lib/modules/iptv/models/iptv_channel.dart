@@ -13,6 +13,7 @@ class IptvChannel {
     this.groupTitle = '',
     this.logo = '',
     this.tvgId = '',
+    this.tvgName = '',
     this.channelNumber,
     this.catchupMode = '',
     this.catchupSource = '',
@@ -40,6 +41,23 @@ class IptvChannel {
 
   /// tvg-id，通常与 EPG 的 channel id 对应
   String tvgId;
+
+  /// tvg-name
+  ///
+  /// 不少聚合源只写 tvg-name、完全不写 tvg-id（CCSH/IPTV 就是这样），
+  /// 而且 `#EXTINF` 最后一个逗号后的台名常带「高清」「4K」这类后缀，
+  /// tvg-name 往往比台名更贴近 EPG 里的 display-name，做匹配时排第二顺位。
+  ///
+  /// 注意：只参与 EPG 匹配，不参与频道 [id] 的生成 —— 改 id 会让已存的
+  /// 关注、播放历史全部对不上。
+  String tvgName;
+
+  /// 和 EPG 匹配用的标识：tvg-id 优先，其次 tvg-name，最后退回台名
+  String get epgKey {
+    if (tvgId.trim().isNotEmpty) return tvgId.trim();
+    if (tvgName.trim().isNotEmpty) return tvgName.trim();
+    return name.trim();
+  }
 
   /// 频道号（tvg-chno），没有则为 null
   int? channelNumber;
@@ -88,6 +106,7 @@ class IptvChannel {
         'groupTitle': groupTitle,
         'logo': logo,
         'tvgId': tvgId,
+        'tvgName': tvgName,
         'channelNumber': channelNumber,
         'catchupMode': catchupMode,
         'catchupSource': catchupSource,
@@ -103,6 +122,7 @@ class IptvChannel {
         groupTitle: (json['groupTitle'] ?? '') as String,
         logo: (json['logo'] ?? '') as String,
         tvgId: (json['tvgId'] ?? '') as String,
+        tvgName: (json['tvgName'] ?? '') as String,
         channelNumber: json['channelNumber'] as int?,
         catchupMode: (json['catchupMode'] ?? '') as String,
         catchupSource: (json['catchupSource'] ?? '') as String,
@@ -141,13 +161,15 @@ class IptvChannelAdapter extends TypeAdapter<IptvChannel> {
       // 老数据没有这一列，读出来是 null，落到 0 由 IptvService 统一迁移
       order: (fields[10] ?? 0) as int,
       altUrls: _stringList(fields[11]),
+      // 老数据没有 tvg-name 这一列，读出来是 null
+      tvgName: (fields[12] ?? '') as String,
     );
   }
 
   @override
   void write(BinaryWriter writer, IptvChannel obj) {
     writer
-      ..writeByte(12)
+      ..writeByte(13)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -171,6 +193,8 @@ class IptvChannelAdapter extends TypeAdapter<IptvChannel> {
       ..writeByte(10)
       ..write(obj.order)
       ..writeByte(11)
-      ..write(obj.altUrls);
+      ..write(obj.altUrls)
+      ..writeByte(12)
+      ..write(obj.tvgName);
   }
 }

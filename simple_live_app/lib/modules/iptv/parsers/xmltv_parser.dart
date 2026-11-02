@@ -16,6 +16,27 @@ class EpgProgramme {
       !time.isBefore(start) && time.isBefore(stop);
 }
 
+/// 把频道标识归一化后再比较
+///
+/// EPG 里的 channel id 和播放列表里的 tvg-id / 频道名往往不是同一种写法：
+/// 全角半角、大小写、空格、连字符都可能不一样（`CCTV-1` / `CCTV 1` / `ＣＣＴＶ１`）。
+/// 这里只做「本来就不该影响语义」的归一，不去猜近似名，免得张冠李戴。
+String normalizeEpgKey(String raw) {
+  final buffer = StringBuffer();
+  for (var c in raw.trim().toLowerCase().runes) {
+    // 全角 ASCII（Ａ-Ｚ、０-９ 等）转半角
+    if (c >= 0xFF01 && c <= 0xFF5E) c -= 0xFEE0;
+    // 全角空格
+    if (c == 0x3000) c = 0x20;
+    // 空白和常见分隔符一律丢掉
+    if (c == 0x20 || c == 0x2D || c == 0x5F || c == 0x00B7 || c == 0x30FB) {
+      continue;
+    }
+    buffer.writeCharCode(c);
+  }
+  return buffer.toString();
+}
+
 /// XMLTV 节目单
 ///
 /// 只做 regex 解析，不引入 xml 包：XMLTV 由 EPG 生成器批量产出，
@@ -24,7 +45,7 @@ class XmltvGuide {
   XmltvGuide({
     required this.programmes,
     required this.channelNames,
-  });
+  }) : _idByNormalizedName = _buildNameIndex(channelNames);
 
   /// 频道ID -> 按开始时间升序的节目列表
   final Map<String, List<EpgProgramme>> programmes;
@@ -32,12 +53,70 @@ class XmltvGuide {
   /// 频道ID -> display-name
   final Map<String, String> channelNames;
 
+  /// 归一化后的 display-name -> 频道ID
+  ///
+  /// 不少 m3u 只给 tvg-name 不给 tvg-id（CCSH/IPTV 这类聚合源就是这样），
+  /// 这时只能靠台名反查 EPG 内部的 channel id，否则永远匹配不到节目单。
+  final Map<String, String> _idByNormalizedName;
+
+  static Map<String, String> _buildNameIndex(
+    Map<String, String> channelNames,
+  ) {
+    final index = <String, String>{};
+    channelNames.forEach((id, name) {
+      final key = normalizeEpgKey(name);
+      // 同名只认第一个，避免不同频道抢同一个名字
+      if (key.isNotEmpty) index.putIfAbsent(key, () => id);
+    });
+    return index;
+  }
+
   bool get isEmpty => programmes.isEmpty;
 
+  /// 把播放列表里的标识（tvg-id / tvg-name / 频道名）解析成 EPG 内部的 channel id
+  ///
+  /// 先按原样精确匹配（tvg-id 通常就是 EPG 的 id），再按归一化后的台名兜底。
+  String? resolveChannelId(String key) {
+    final raw = key.trim();
+    if (raw.isEmpty) return null;
+    if (programmes.containsKey(raw)) return raw;
+    if (channelNames.containsKey(raw)) return raw;
+    final normalized = normalizeEpgKey(raw);
+    if (normalized.isEmpty) return null;
+    return _idByNormalizedName[normalized];
+  }
+
+  /// 这份节目单里有没有该频道的数据
+  bool hasChannel(String key) => resolveChannelId(key) != null;
+
+  /// 按播放列表里的标识取节目列表
+  List<EpgProgramme> programmesFor(String key) {
+    final id = resolveChannelId(key);
+    if (id == null) return const <EpgProgramme>[];
+    return programmes[id] ?? const <EpgProgramme>[];
+  }
+
+  /// 按 EPG 原始 channel id 取节目列表
   List<EpgProgramme> programmesOf(String channelId) =>
       programmes[channelId] ?? const <EpgProgramme>[];
 
-  /// 取指定时刻正在播出的节目
+  /// 取指定时刻正在播出的节目（按播放列表标识）
+  EpgProgramme? currentFor(String key, DateTime at) {
+    for (final p in programmesFor(key)) {
+      if (p.contains(at)) return p;
+    }
+    return null;
+  }
+
+  /// 取指定时刻之后最近的一档节目（按播放列表标识）
+  EpgProgramme? nextFor(String key, DateTime at) {
+    for (final p in programmesFor(key)) {
+      if (p.start.isAfter(at)) return p;
+    }
+    return null;
+  }
+
+  /// 取指定时刻正在播出的节目（按 EPG 原始 channel id）
   EpgProgramme? currentAt(String channelId, DateTime at) {
     for (final p in programmesOf(channelId)) {
       if (p.contains(at)) return p;
@@ -45,7 +124,7 @@ class XmltvGuide {
     return null;
   }
 
-  /// 取指定时刻之后最近的一档节目
+  /// 取指定时刻之后最近的一档节目（按 EPG 原始 channel id）
   EpgProgramme? nextAfter(String channelId, DateTime at) {
     for (final p in programmesOf(channelId)) {
       if (p.start.isAfter(at)) return p;
@@ -76,7 +155,9 @@ class XmltvParser {
       final id = attrs['id']?.trim() ?? '';
       if (id.isEmpty) continue;
       final nameMatch = _displayNameRegex.firstMatch(m.group(2) ?? '');
-      final name = nameMatch == null ? id : _unescape(nameMatch.group(1) ?? id).trim();
+      final name = nameMatch == null
+          ? id
+          : _unescape(nameMatch.group(1) ?? id).trim();
       channelNames[id] = name.isEmpty ? id : name;
     }
 

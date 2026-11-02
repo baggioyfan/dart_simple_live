@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:dio/dio.dart';
 import 'package:get/get.dart';
 import 'package:hive/hive.dart';
@@ -315,18 +318,37 @@ class IptvService extends GetxService {
 
   Future<String> _fetchText(String url) async {
     try {
-      final response = await _dio.get<String>(
+      // 按字节取，不按文本取：m3u 和 EPG 都可能直接是 .gz 包
+      final response = await _dio.get<List<int>>(
         url,
-        options: Options(responseType: ResponseType.plain),
+        options: Options(responseType: ResponseType.bytes),
       );
       final data = response.data;
       if (data == null || data.isEmpty) {
         throw Exception('返回内容为空');
       }
-      return data;
+      return _decodeText(data);
     } on DioException catch (e) {
       throw Exception('请求失败：${e.message ?? e.type.name}');
     }
+  }
+
+  /// 把响应字节解成文本
+  ///
+  /// EPG 常见 `xxx.xml.gz`：文件本身就是 gzip 内容，服务器一般不会带
+  /// `Content-Encoding: gzip`，Dio 也就不会自动解压。以前直接按文本读，
+  /// 拿到的是解坏了的乱码，后面的正则一条都匹配不到，界面上就表现为
+  /// 「这个频道没有节目单」—— 源里明明有 EPG 地址。
+  String _decodeText(List<int> bytes) {
+    if (bytes.length > 2 && bytes[0] == 0x1f && bytes[1] == 0x8b) {
+      try {
+        return utf8.decode(gzip.decode(bytes));
+      } catch (e) {
+        // 解压失败就按原样解码，至少能看出拿到的是什么
+        Log.logPrint(e);
+      }
+    }
+    return utf8.decode(bytes, allowMalformed: true);
   }
 
   String _guessName(String url) {

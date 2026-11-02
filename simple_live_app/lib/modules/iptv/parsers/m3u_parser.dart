@@ -225,6 +225,9 @@ class M3uParser {
         groupTitle: group.isEmpty ? '未分组' : group,
         logo: logo,
         tvgId: tvgId,
+        // 只存不参与 id 生成（改 id 会让已存的关注/历史对不上），
+        // 用于在 tvg-id 缺失时按台名匹配 EPG
+        tvgName: (attrs['tvg-name'] ?? '').trim(),
         channelNumber: channelNumber,
         catchupMode: channelCatchupMode,
         catchupSource: channelCatchupSource,
