@@ -126,9 +126,13 @@ class IptvService extends GetxService {
   // ---------------- 导入 / 刷新 ----------------
 
   /// 从地址导入一个新源，并立刻拉取频道
+  ///
+  /// [epgUrl] 是用户手填的节目单地址：填了就以它为准，
+  /// 留空则由 [refreshSource] 从 m3u 头部的 x-tvg-url 取。
   Future<IptvSource> importFromUrl({
     required String url,
     String? name,
+    String epgUrl = '',
   }) async {
     final trimmed = url.trim();
     if (trimmed.isEmpty) {
@@ -140,6 +144,7 @@ class IptvService extends GetxService {
           ? _guessName(trimmed)
           : name.trim(),
       url: trimmed,
+      epgUrl: epgUrl.trim(),
     );
     await sourceBox.put(source.id, source);
     try {
@@ -180,8 +185,9 @@ class IptvService extends GetxService {
       ..lastUpdate = DateTime.now()
       ..catchupMode = playlist.catchupMode
       ..catchupSource = playlist.catchupSource;
-    // m3u 头部没带 EPG 时保留用户手填的地址
-    if (playlist.epgUrl.isNotEmpty) {
+    // m3u 头部带的 EPG 只在用户没手填时补上：手填的地址不能被刷新覆盖，
+    // 否则用户改了 EPG 地址、一刷新又被列表带回去，等于白改。
+    if (source.epgUrl.trim().isEmpty && playlist.epgUrl.isNotEmpty) {
       source.epgUrl = playlist.epgUrl;
     }
     await sourceBox.put(source.id, source);
@@ -241,6 +247,12 @@ class IptvService extends GetxService {
   void clearEpgCache() {
     _epgCache.clear();
     _epgCacheTime.clear();
+  }
+
+  /// 只清指定源的节目单缓存（改了该源的 EPG 地址后调用）
+  void clearEpgCacheOf(String sourceId) {
+    _epgCache.remove(sourceId);
+    _epgCacheTime.remove(sourceId);
   }
 
   /// 读取节目单，内存缓存 [IptvService._epgTtl]

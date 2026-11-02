@@ -73,12 +73,22 @@ class IptvSourceController extends GetxController {
   }
 
   /// 导入新源，成功返回 true
-  Future<bool> importSource({required String url, String name = ''}) async {
+  ///
+  /// [epgUrl] 是用户手填的节目单地址，空串表示沿用 m3u 头部自带的 x-tvg-url。
+  Future<bool> importSource({
+    required String url,
+    String name = '',
+    String epgUrl = '',
+  }) async {
     if (busy.value) return false;
     busy.value = true;
     SmartDialog.showLoading(msg: "正在拉取播放列表");
     try {
-      final source = await _service.importFromUrl(url: url, name: name);
+      final source = await _service.importFromUrl(
+        url: url,
+        name: name,
+        epgUrl: epgUrl,
+      );
       reload();
       _reloadLiveTabs();
       SmartDialog.showToast("导入成功，${source.channelCount} 个频道");
@@ -183,14 +193,17 @@ class IptvSourceController extends GetxController {
     }
   }
 
-  /// 修改源的名称和地址（同一个入口）
+  /// 修改源的名称、地址和 EPG 地址（同一个入口）
   ///
   /// 先改地址再改名：地址那步可能失败，失败就整体不动，避免出现
   /// 「名字改了、地址还是旧的」这种半截状态。
+  ///
+  /// [epgUrl] 传 null 表示这次不碰 EPG 地址；传空串表示清空。
   Future<void> editSource(
     IptvSource source, {
     required String url,
     required String name,
+    String? epgUrl,
   }) async {
     if (busy.value) return;
 
@@ -203,8 +216,10 @@ class IptvSourceController extends GetxController {
 
     final urlChanged = newUrl != source.url.trim();
     final nameChanged = newName.isNotEmpty && newName != source.name;
+    final newEpg = epgUrl?.trim();
+    final epgChanged = newEpg != null && newEpg != source.epgUrl.trim();
 
-    if (!urlChanged && !nameChanged) {
+    if (!urlChanged && !nameChanged && !epgChanged) {
       SmartDialog.showToast("没有变化");
       return;
     }
@@ -216,6 +231,23 @@ class IptvSourceController extends GetxController {
     if (nameChanged) {
       await rename(source, newName);
     }
+    if (epgChanged && newEpg != null) {
+      await updateSourceEpg(source, newEpg);
+    }
+  }
+
+  /// 只改 EPG 地址
+  ///
+  /// 节目单是按源缓存的，地址一变旧缓存必须作废，否则界面上还是以前的节目单。
+  Future<void> updateSourceEpg(IptvSource source, String epgUrl) async {
+    final newEpg = epgUrl.trim();
+    if (newEpg == source.epgUrl.trim()) return;
+
+    source.epgUrl = newEpg;
+    await _service.updateSource(source);
+    _service.clearEpgCacheOf(source.id);
+    reload();
+    SmartDialog.showToast(newEpg.isEmpty ? "已清空 EPG 地址" : "EPG 地址已保存");
   }
 
   Future<void> remove(IptvSource source) async {
