@@ -218,7 +218,7 @@ class IptvSourcePage extends GetView<IptvSourceController> {
           ),
           const PopupMenuItem(
             value: "edit",
-            child: Text("编辑地址与名称"),
+            child: Text("编辑地址、名称与 EPG"),
           ),
           const PopupMenuItem(
             value: "delete",
@@ -265,6 +265,7 @@ class IptvSourcePage extends GetView<IptvSourceController> {
             source,
             url: result.url,
             name: result.name,
+            epgUrl: result.epgUrl,
           );
         }
         break;
@@ -283,7 +284,11 @@ class IptvSourcePage extends GetView<IptvSourceController> {
       builder: (_) => const _SourceFormDialog(),
     );
     if (result == null) return;
-    await controller.importSource(url: result.url, name: result.name);
+    await controller.importSource(
+      url: result.url,
+      name: result.name,
+      epgUrl: result.epgUrl,
+    );
   }
 
   /// 编辑名称与地址
@@ -296,6 +301,7 @@ class IptvSourcePage extends GetView<IptvSourceController> {
       builder: (_) => _SourceFormDialog(
         initialUrl: source.url,
         initialName: source.name,
+        initialEpgUrl: source.epgUrl,
         title: "编辑直播源",
         confirmText: "保存",
       ),
@@ -325,15 +331,19 @@ class IptvSourcePage extends GetView<IptvSourceController> {
 }
 
 class _SourceFormResult {
-  _SourceFormResult(this.url, this.name);
+  _SourceFormResult(this.url, this.name, this.epgUrl);
   final String url;
   final String name;
+
+  /// EPG 地址，空串表示「不手填，沿用 m3u 头部自带的」
+  final String epgUrl;
 }
 
 class _SourceFormDialog extends StatefulWidget {
   const _SourceFormDialog({
     this.initialUrl = '',
     this.initialName = '',
+    this.initialEpgUrl = '',
     this.title = '添加直播源',
     this.confirmText = '导入',
   });
@@ -341,6 +351,7 @@ class _SourceFormDialog extends StatefulWidget {
   /// 编辑时预填当前值；新增时都是空
   final String initialUrl;
   final String initialName;
+  final String initialEpgUrl;
   final String title;
   final String confirmText;
 
@@ -353,11 +364,14 @@ class _SourceFormDialogState extends State<_SourceFormDialog> {
       TextEditingController(text: widget.initialUrl);
   late final TextEditingController nameController =
       TextEditingController(text: widget.initialName);
+  late final TextEditingController epgController =
+      TextEditingController(text: widget.initialEpgUrl);
 
   @override
   void dispose() {
     urlController.dispose();
     nameController.dispose();
+    epgController.dispose();
     super.dispose();
   }
 
@@ -365,27 +379,40 @@ class _SourceFormDialogState extends State<_SourceFormDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(widget.title),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: urlController,
-            autofocus: true,
-            keyboardType: TextInputType.url,
-            decoration: const InputDecoration(
-              labelText: "播放列表地址",
-              hintText: "http://example.com/playlist.m3u",
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: urlController,
+              autofocus: true,
+              keyboardType: TextInputType.url,
+              decoration: const InputDecoration(
+                labelText: "播放列表地址",
+                hintText: "http://example.com/playlist.m3u",
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: nameController,
-            decoration: const InputDecoration(
-              labelText: "名称（可选）",
-              hintText: "留空则自动取地址末段",
+            const SizedBox(height: 8),
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(
+                labelText: "名称（可选）",
+                hintText: "留空则自动取地址末段",
+              ),
             ),
-          ),
-        ],
+            const SizedBox(height: 8),
+            TextField(
+              controller: epgController,
+              keyboardType: TextInputType.url,
+              decoration: const InputDecoration(
+                labelText: "EPG 地址（可选）",
+                hintText: "http://example.com/epg.xml.gz",
+                helperText: "留空则用 m3u 头部的 x-tvg-url；手填的不会被刷新覆盖",
+                helperMaxLines: 2,
+              ),
+            ),
+          ],
+        ),
       ),
       actions: [
         TextButton(
@@ -397,7 +424,11 @@ class _SourceFormDialogState extends State<_SourceFormDialog> {
             final url = urlController.text.trim();
             if (url.isEmpty) return;
             Navigator.of(context).pop(
-              _SourceFormResult(url, nameController.text.trim()),
+              _SourceFormResult(
+                url,
+                nameController.text.trim(),
+                epgController.text.trim(),
+              ),
             );
           },
           child: Text(widget.confirmText),
