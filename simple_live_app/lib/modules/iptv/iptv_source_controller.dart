@@ -231,7 +231,7 @@ class IptvSourceController extends GetxController {
     if (nameChanged) {
       await rename(source, newName);
     }
-    if (epgChanged && newEpg != null) {
+    if (epgChanged) {
       await updateSourceEpg(source, newEpg);
     }
   }
