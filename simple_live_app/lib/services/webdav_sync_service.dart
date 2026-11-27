@@ -90,6 +90,12 @@ class WebDavSyncService extends GetxService with WidgetsBindingObserver {
   /// 最近一次同步结果，给界面显示
   final RxString status = ''.obs;
 
+  /// 自动同步总开关
+  ///
+  /// 默认关。关着的时候不监听改动、不跑定时检查，只有手动上传/恢复能动；
+  /// 打开之后下面前两个开关才有意义。
+  final RxBool autoSync = false.obs;
+
   final RxBool autoUpload = true.obs;
   final RxBool autoDownload = true.obs;
   final RxInt checkInterval = defaultCheckInterval.obs;
@@ -150,6 +156,7 @@ class WebDavSyncService extends GetxService with WidgetsBindingObserver {
     LocalStorageService.kWebDAVLastUploadTime,
     LocalStorageService.kWebDAVLastRecoverTime,
     LocalStorageService.kWebDAVSyncedTime,
+    LocalStorageService.kWebDAVAutoSync,
     LocalStorageService.kWebDAVAutoUpload,
     LocalStorageService.kWebDAVAutoDownload,
     LocalStorageService.kWebDAVCheckInterval,
@@ -184,6 +191,8 @@ class WebDavSyncService extends GetxService with WidgetsBindingObserver {
     // 云端检查放到首屏之后，别和启动时的网络请求抢
     Future.delayed(startupDelay, () {
       if (!configured) return;
+      // 总开关关着就什么都不做，启动也别去探云端
+      if (!autoSync.value) return;
       // 上次退出前没传完的改动优先补传：这时候去下载会把本地改动冲掉
       if (_dirty) {
         if (autoUpload.value) _uploadNow();
@@ -210,7 +219,7 @@ class WebDavSyncService extends GetxService with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (!configured) return;
+    if (!configured || !autoSync.value) return;
     switch (state) {
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
@@ -238,6 +247,8 @@ class WebDavSyncService extends GetxService with WidgetsBindingObserver {
     user.value = _storage.getValue(LocalStorageService.kWebDAVUser, '--');
     _password = _storage.getValue(LocalStorageService.kWebDAVPassword, '');
 
+    autoSync.value =
+        _storage.getValue(LocalStorageService.kWebDAVAutoSync, false);
     autoUpload.value =
         _storage.getValue(LocalStorageService.kWebDAVAutoUpload, true);
     autoDownload.value =
@@ -342,22 +353,48 @@ class WebDavSyncService extends GetxService with WidgetsBindingObserver {
     _retry?.cancel();
   }
 
+  Future<void> setAutoSync(bool value) async {
+    autoSync.value = value;
+    await _storage.setValue(LocalStorageService.kWebDAVAutoSync, value);
+    _restartAuto();
+  }
+
   Future<void> setAutoUpload(bool value) async {
     autoUpload.value = value;
     await _storage.setValue(LocalStorageService.kWebDAVAutoUpload, value);
-    if (value && _dirty) _scheduleUpload();
+    _restartAuto();
   }
 
   Future<void> setAutoDownload(bool value) async {
     autoDownload.value = value;
     await _storage.setValue(LocalStorageService.kWebDAVAutoDownload, value);
-    _startPeriodic();
+    _restartAuto();
   }
 
   Future<void> setCheckInterval(int minutes) async {
     checkInterval.value = minutes;
     await _storage.setValue(LocalStorageService.kWebDAVCheckInterval, minutes);
+    _restartAuto();
+  }
+
+  /// 按当前开关状态重排自动同步的定时任务
+  ///
+  /// 三个开关任何一动都走这里：先把在等的那几个定时器全撤掉，再按新状态
+  /// 决定要不要重新起。不这么做会出现「已经关掉自动上传了，10 秒前挂上的
+  /// 那个防抖定时器到点还是把人传了一遍」。
+  void _restartAuto() {
+    _debounce?.cancel();
+    _periodic?.cancel();
+    _retry?.cancel();
+    _debounce = null;
+    _periodic = null;
+    _retry = null;
+    _retryDelay = _retryBase;
+
+    if (!autoSync.value) return;
     _startPeriodic();
+    // 刚打开总开关时如果攒着没传出去的改动，补传一次
+    if (_dirty && autoUpload.value) _scheduleUpload();
   }
 
   Future<void> setSyncFollows(bool value) async {
@@ -416,6 +453,8 @@ class WebDavSyncService extends GetxService with WidgetsBindingObserver {
     final until = _suppressUntil;
     if (until != null && DateTime.now().isBefore(until)) return;
     if (!configured) return;
+    // 总开关关着：不置 dirty、不排上传，相当于自动同步这套完全不存在
+    if (!autoSync.value) return;
     _markDirty();
     if (!autoUpload.value) return;
     Log.d('WebDAV：$label 有改动，等待自动上传');
@@ -444,7 +483,7 @@ class WebDavSyncService extends GetxService with WidgetsBindingObserver {
   }
 
   Future<void> _uploadNow() async {
-    if (!configured || !autoUpload.value) return;
+    if (!configured || !autoSync.value || !autoUpload.value) return;
     if (!_dirty) return;
 
     // 正在同步就等它结束再说，不要并发
@@ -475,6 +514,7 @@ class WebDavSyncService extends GetxService with WidgetsBindingObserver {
   }
 
   void _scheduleRetry() {
+    if (!autoSync.value) return;
     _retry?.cancel();
     _retry = Timer(_retryDelay, _uploadNow);
     // 逐次翻倍，避免断网时频繁打服务器
@@ -484,7 +524,7 @@ class WebDavSyncService extends GetxService with WidgetsBindingObserver {
 
   void _startPeriodic() {
     _periodic?.cancel();
-    if (!configured || !autoDownload.value) return;
+    if (!configured || !autoSync.value || !autoDownload.value) return;
     _periodic = Timer.periodic(
       Duration(minutes: checkInterval.value),
       (_) {
@@ -637,7 +677,8 @@ class WebDavSyncService extends GetxService with WidgetsBindingObserver {
   /// [force] 为 true 时忽略「自动下载」开关（界面上的「立即检查云端」用）。
   Future<bool> checkRemote({bool silent = false, bool force = false}) async {
     if (!configured) return false;
-    if (!force && !autoDownload.value) return false;
+    // force 是用户手点的「立即检查云端」，不受自动同步开关限制
+    if (!force && (!autoSync.value || !autoDownload.value)) return false;
     if (syncing.value) return false;
 
     try {

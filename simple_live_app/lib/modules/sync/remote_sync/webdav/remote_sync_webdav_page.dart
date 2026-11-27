@@ -93,11 +93,25 @@ class RemoteSyncWebDAVPage extends GetView<RemoteSyncWebDAVController> {
   /// 自动同步设置
   ///
   /// 手动点上传/恢复的问题在于：改完设置或者点了关注，另一台设备不点一下就
-  /// 不会变。这里给两个开关，分别控制「改了就传」和「云端新了就拉」。
+  /// 不会变。这里给一个总开关，打开后才启用「改了就传」和「云端新了就拉」。
+  /// 总开关默认关着：老用户升级上来不该在不知情的情况下被自动覆盖数据。
   Widget _autoSyncSection() {
     final service = WebDavSyncService.instance;
+    final autoSync = controller.autoSync.value;
     return Column(
       children: [
+        SwitchListTile(
+          value: autoSync,
+          dense: true,
+          secondary: const Icon(Icons.sync),
+          title: const Text("自动同步", style: TextStyle(fontSize: 15)),
+          subtitle: const Text(
+            "打开后本地改动会自动上传，云端有新数据时自动恢复",
+            style: TextStyle(fontSize: 11),
+          ),
+          onChanged: controller.changeAutoSync,
+        ),
+        AppStyle.divider,
         SwitchListTile(
           value: controller.autoUpload.value,
           dense: true,
@@ -107,7 +121,7 @@ class RemoteSyncWebDAVPage extends GetView<RemoteSyncWebDAVController> {
             "关注、标签、历史、直播源、设置改动后自动上传",
             style: TextStyle(fontSize: 11),
           ),
-          onChanged: controller.changeAutoUpload,
+          onChanged: autoSync ? controller.changeAutoUpload : null,
         ),
         AppStyle.divider,
         SwitchListTile(
@@ -119,9 +133,9 @@ class RemoteSyncWebDAVPage extends GetView<RemoteSyncWebDAVController> {
             "启动、回到前台和定时检查，云端有新数据时自动恢复",
             style: TextStyle(fontSize: 11),
           ),
-          onChanged: controller.changeAutoDownload,
+          onChanged: autoSync ? controller.changeAutoDownload : null,
         ),
-        if (controller.autoDownload.value) ...[
+        if (autoSync && controller.autoDownload.value) ...[
           AppStyle.divider,
           ListTile(
             dense: true,

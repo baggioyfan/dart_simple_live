@@ -26,6 +26,7 @@ class RemoteSyncWebDAVController extends GetxController {
   RxBool get syncing => _sync.syncing;
   RxString get status => _sync.status;
 
+  RxBool get autoSync => _sync.autoSync;
   RxBool get autoUpload => _sync.autoUpload;
   RxBool get autoDownload => _sync.autoDownload;
   RxInt get checkInterval => _sync.checkInterval;
@@ -73,8 +74,10 @@ class RemoteSyncWebDAVController extends GetxController {
 
   /// 立即检查云端有没有新数据
   ///
-  /// force：即使「自动下载」关着也执行一次，这是用户主动点的
+  /// force：即使自动同步关着也执行一次，这是用户主动点的
   Future<void> checkRemoteNow() => _sync.checkRemote(force: true);
+
+  void changeAutoSync(bool value) => _sync.setAutoSync(value);
 
   void changeAutoUpload(bool value) => _sync.setAutoUpload(value);
 

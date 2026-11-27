@@ -174,6 +174,13 @@ class LocalStorageService extends GetxService {
   /// 后者是本地时钟、只用于界面展示，拿它跟服务器的 mtime 比会受时钟偏差影响。
   static const String kWebDAVSyncedTime = "kWebDAVSyncedTime";
 
+  /// WebDAV_自动同步总开关
+  ///
+  /// 关掉之后自动上传、自动下载、定时检查全部停摆，只剩手动上传/恢复。
+  /// 默认关闭：老版本只有手动同步，升级上来不该在用户不知情时开始自动
+  /// 上传下载（自动下载会覆盖本地数据）。
+  static const String kWebDAVAutoSync = "kWebDAVAutoSync";
+
   /// WebDAV_自动上传
   static const String kWebDAVAutoUpload = "kWebDAVAutoUpload";
 
