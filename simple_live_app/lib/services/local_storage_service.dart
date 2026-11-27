@@ -170,6 +170,50 @@ class LocalStorageService extends GetxService {
   /// WebDAV_最后一次备份时间
   static const String kWebDAVLastRecoverTime = "kWebDAVLastRecoverTime";
 
+  /// WebDAV_本地数据与云端一致的时间点
+  ///
+  /// 存的是**服务器返回的**文件修改时间，不是本地时钟。自动下载靠它判断
+  /// 「云端有没有比我新的数据」：和 [kWebDAVLastUploadTime] 的区别在于，
+  /// 后者是本地时钟、只用于界面展示，拿它跟服务器的 mtime 比会受时钟偏差影响。
+  static const String kWebDAVSyncedTime = "kWebDAVSyncedTime";
+
+  /// WebDAV_自动同步总开关
+  ///
+  /// 关掉之后自动上传、自动下载、定时检查全部停摆，只剩手动上传/恢复。
+  /// 默认关闭：老版本只有手动同步，升级上来不该在用户不知情时开始自动
+  /// 上传下载（自动下载会覆盖本地数据）。
+  static const String kWebDAVAutoSync = "kWebDAVAutoSync";
+
+  /// WebDAV_自动上传
+  static const String kWebDAVAutoUpload = "kWebDAVAutoUpload";
+
+  /// WebDAV_自动下载
+  static const String kWebDAVAutoDownload = "kWebDAVAutoDownload";
+
+  /// WebDAV_自动检查云端的间隔（分钟）
+  static const String kWebDAVCheckInterval = "kWebDAVCheckInterval";
+
+  /// WebDAV_同步项：关注列表
+  static const String kWebDAVSyncFollows = "kWebDAVSyncFollows";
+
+  /// WebDAV_同步项：播放历史
+  static const String kWebDAVSyncHistories = "kWebDAVSyncHistories";
+
+  /// WebDAV_同步项：屏蔽字
+  static const String kWebDAVSyncBlockWord = "kWebDAVSyncBlockWord";
+
+  /// WebDAV_同步项：哔哩哔哩账号
+  static const String kWebDAVSyncBiliAccount = "kWebDAVSyncBiliAccount";
+
+  /// WebDAV_同步项：自定义直播源
+  static const String kWebDAVSyncIptv = "kWebDAVSyncIptv";
+
+  /// WebDAV_有改动还没上传出去
+  ///
+  /// 改动只在内存里标记的话，用户改完直接把 App 划掉，这个标记就丢了，
+  /// 那次改动要等到下一次改动才会被带上去。落盘之后下次启动能补传。
+  static const String kWebDAVPendingUpload = "kWebDAVPendingUpload";
+
   /// 开启 IPTV 直播源自动更新
   static const String kIptvAutoRefreshEnable = "IptvAutoRefreshEnable";
 

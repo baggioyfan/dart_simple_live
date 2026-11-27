@@ -53,4 +53,18 @@ class DAVClient {
     final data = await client.read(backupFile);
     return data;
   }
+
+  /// 云端备份文件的修改时间
+  ///
+  /// 自动同步靠它判断云端有没有比本地更新的数据。返回的是**服务器时钟**，
+  /// 所以调用方不要拿本地 `DateTime.now()` 去比较。
+  /// 文件不存在或请求失败都返回 null（服务器不支持 PROPFIND 也会走到这里）。
+  Future<DateTime?> remoteModified() async {
+    try {
+      final props = await client.readProps(backupFile);
+      return props.mTime;
+    } catch (_) {
+      return null;
+    }
+  }
 }
